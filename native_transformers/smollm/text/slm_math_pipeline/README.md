@@ -14,6 +14,30 @@ The baseline is designed for **8xH200** training setups.
 - `configs/`: model, dataset, and stage-specific training configs.
 - `scripts/`: reproducible scripts for dataset curation, launch, and eval.
 
+## Environment setup (reproducible)
+
+```bash
+cd native_transformers/smollm/text/slm_math_pipeline
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Install Megatron-LM (required for pretraining launcher):
+
+```bash
+cd /path/to/your/workspace
+git clone https://github.com/NVIDIA/Megatron-LM.git
+cd Megatron-LM
+pip install -e .
+```
+
+Optional but recommended for exact reproducibility:
+- capture the fully resolved environment after install:
+  - `pip freeze > requirements.lock.txt`
+- store CUDA/NVIDIA versions with your run logs.
+
 ## Data sources (initial baseline)
 
 ### Pretrain mix (web + specialist math)
