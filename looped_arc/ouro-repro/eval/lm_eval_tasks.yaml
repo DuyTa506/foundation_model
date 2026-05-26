@@ -1,0 +1,14 @@
+tasks:
+  - gsm8k
+  - mathqa
+  - mmlu
+  - arc_challenge
+  - bbh
+  - winogrande
+  - hellaswag
+  - truthfulqa_mc2
+
+decode:
+  temperature: 1.0
+  top_p: 0.7
+  max_new_tokens: 1024

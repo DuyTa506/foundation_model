@@ -1,0 +1,28 @@
+output_dir: /tmp/ouro-repro/stage1_scratch_custom_tokenizer
+
+# For true scratch training:
+# - tokenizer_name_or_path points to your newly trained tokenizer
+# - vocab_size must exactly match len(tokenizer)
+model_name_or_path: /tmp/unused_in_scratch_mode
+tokenizer_name_or_path: /path/to/your/tokenizer
+init_from_scratch: true
+vocab_size: 50000
+
+dataset_name: HuggingFaceFW/fineweb-edu
+dataset_config: sample-10BT
+text_field: text
+split: train
+seq_len: 4096
+steps: 200000
+batch_size: 2
+grad_accum: 32
+lr: 3.0e-4
+weight_decay: 0.1
+warmup_steps: 2000
+total_ut_steps: 4
+kl_beta: 0.1
+include_adaptive_exit_loss: false
+adaptive_exit_weight: 0.1
+save_every: 1000
+log_every: 20
+seed: 42

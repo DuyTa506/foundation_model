@@ -1,0 +1,6 @@
+torch>=2.2
+transformers>=4.54.1,<4.56.0
+datasets>=2.20.0
+pyyaml>=6.0.1
+accelerate>=0.33.0
+pytest>=8.2.0

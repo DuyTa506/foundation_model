@@ -1,0 +1,72 @@
+version: 1
+seed: 42
+
+mode:
+  primary: dpo
+  fallback: sft
+
+curation:
+  languages:
+    allow:
+      - en
+      - vi
+  remove_empty_pairs: true
+  reasoning_tags:
+    strip_think_tags: true
+
+sources:
+  preference_pairs:
+    - id: ultrafeedback_math_style
+      hf_dataset: openbmb/UltraData-Math
+      subset: UltraData-Math-L3-QA-Synthetic
+      split: train
+      prompt_field: prompt
+      chosen_field: chosen
+      rejected_field: rejected
+      language: en
+      enabled: false
+      note: "Set enabled=true when a valid chosen/rejected schema is confirmed."
+    - id: vi_openhermes_preferences_66k
+      hf_dataset: 5CD-AI/Vietnamese-argilla-OpenHermesPreferences-66k-gg-translated
+      split: train
+      prompt_field: prompt
+      chosen_field: chosen
+      rejected_field: rejected
+      language: vi
+      enabled: false
+      note: "Schema must be verified before enabling for DPO."
+
+  sft_fallback:
+    - id: mathinstruct
+      hf_dataset: agicorp/MathInstruct
+      split: train
+      prompt_field: instruction
+      response_field: output
+      language: en
+      weight: 0.60
+    - id: metamathqa
+      hf_dataset: meta-math/MetaMathQA
+      split: train
+      prompt_field: query
+      response_field: response
+      language: en
+      weight: 0.40
+    - id: vi_metamath_395k
+      hf_dataset: 5CD-AI/Vietnamese-395k-meta-math-MetaMathQA-gg-translated
+      split: train
+      prompt_field: query
+      response_field: response
+      language: vi
+      weight: 0.25
+    - id: vi_openmathinstruct_50k
+      hf_dataset: 5CD-AI/Vietnamese-nvidia-OpenMathInstruct-1-50k-gg-translated
+      split: train
+      prompt_field: instruction
+      response_field: output
+      language: vi
+      weight: 0.15
+
+output:
+  preference_manifest_name: posttrain_preference_manifest.jsonl
+  sft_manifest_name: posttrain_sft_manifest.jsonl
+  data_card_name: posttrain_data_card.json

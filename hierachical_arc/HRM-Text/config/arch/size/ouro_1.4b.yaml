@@ -1,0 +1,15 @@
+# Approximate Ouro-1.4B geometry
+n_layers: 24
+
+hidden_size: 2048
+num_heads: 32
+expansion: 4
+
+norm_type: pre
+norm_eps: 1e-6
+
+rope_theta: 10000.0
+pos_emb_type: rope
+
+init_type: lecun_normal
+

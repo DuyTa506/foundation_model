@@ -1,0 +1,7 @@
+name: baselines.ut_nocarry@UniversalTransformer
+head: lm_head@LMHead
+
+# Ouro-like flat looped transformer approximation
+cycles: 4
+bp_cycles: 4
+

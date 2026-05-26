@@ -1,0 +1,104 @@
+version: 1
+seed: 42
+
+curation:
+  languages:
+    allow:
+      - en
+      - vi
+  min_chars: 256
+  max_chars: 250000
+  dedup:
+    enabled: true
+    method: minhash_lsh
+    num_hashes: 128
+    ngram_size: 13
+    jaccard_threshold: 0.85
+  decontamination:
+    enabled: true
+    ngram_size: 13
+    benchmark_sets:
+      - gsm8k
+      - math
+      - mmlu
+      - arc
+
+sources:
+  - id: finemath
+    hf_dataset: HuggingFaceTB/finemath
+    split: train
+    text_field: text
+    language: en
+    weight: 0.28
+    role: specialist_math
+  - id: ultradata_math_l2
+    hf_dataset: openbmb/UltraData-Math
+    subset: UltraData-Math-L2-preview
+    split: train
+    text_field: text
+    language: en
+    weight: 0.20
+    role: specialist_math
+  - id: open_web_math
+    hf_dataset: open-web-math/open-web-math
+    split: train
+    text_field: text
+    language: en
+    weight: 0.15
+    role: specialist_math
+  - id: fineweb2_hq_en
+    hf_dataset: epfml/FineWeb2-HQ
+    subset: eng_Latn
+    split: train
+    text_field: text
+    language: en
+    weight: 0.14
+    role: web_backbone
+  - id: fineweb2_hq_vi
+    hf_dataset: epfml/FineWeb2-HQ
+    subset: vie_Latn
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.08
+    role: web_backbone_vi
+  - id: culturax_vi
+    hf_dataset: uonlp/CulturaX
+    subset: vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.05
+    role: web_backbone_vi
+  - id: vi_curated
+    hf_dataset: VTSNLP/vietnamese_curated_dataset
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.04
+    role: curated_vi
+  - id: c4_vi
+    hf_dataset: Symato/c4_vi-filtered_200GB
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.03
+    role: web_backbone_vi
+  - id: madlad_vi
+    hf_dataset: Symato/madlad-400_vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.02
+    role: multilingual_vi
+  - id: hplt_vi
+    hf_dataset: Symato/hplt-vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.01
+    role: web_backbone_vi
+
+output:
+  manifest_name: dataset_manifest.jsonl
+  data_card_name: data_card.json

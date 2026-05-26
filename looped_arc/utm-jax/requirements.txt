@@ -1,0 +1,15 @@
+jax[tpu]
+flax
+optax
+orbax-checkpoint
+wandb
+numpy
+tqdm
+pydantic
+hydra-core
+pytest
+torch
+
+coolname
+pyyaml
+argdantic

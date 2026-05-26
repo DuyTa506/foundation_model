@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /data: arc
+  - override /model: trm
+  - override /callbacks: default
+  - override /trainer: gpu
+
+tags: ["arc", "trm"]
+
+timekeeping:
+  max_epochs: 10  # Longer training for combined losses
+  batch_size: 128
+  num_workers: 4
+  # nb_samples_per_epoch: 100
+
+trainer:
+  accumulate_grad_batches: 1
+  val_check_interval: 0.25  # Check 4x per epoch
+  log_every_n_steps: 1
+
+save_dir: /tmp/ml-experiments
+append_wandb_name_to_save_dir: true

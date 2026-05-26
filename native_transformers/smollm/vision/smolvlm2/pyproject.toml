@@ -1,0 +1,46 @@
+[project]
+name = "smolvlm"
+version = "0.1.0"
+description = "Fine-tuning smolvlm models with multi-modal support (images + videos)."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Orr Zohar", email = "orrzohar@stanford.edu" }
+]
+keywords = ["NLP", "deep-learning", "transformers", "multi-modal", "vision-language", "video"]
+dependencies = [
+  "torch>=2.1.2",
+  "torchvision",
+  "transformers>=4.47.1",
+  "datasets>=2.0.0",
+  "peft>=0.2.0",
+  "deepspeed>=0.13.5",
+  "safetensors>=0.2.0",
+  "bitsandbytes>=0.37.0",
+  "accelerate>=0.33.0",
+  "ujson>=5.0.0",
+  "numpy>=1.21.0",
+  "opencv-python",
+  "chardet",
+  "decord",
+  "liger-kernel",
+  "tabulate",
+  "num2words",
+]
+
+[project.optional-dependencies]
+wandb = [
+  "wandb>=0.12.0",
+]
+tensorboard = [
+  "tensorboard>=2.9.0",
+]
+train = ["ninja", "wandb", "ipdb"]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["smolvlm*", "scripts*"]

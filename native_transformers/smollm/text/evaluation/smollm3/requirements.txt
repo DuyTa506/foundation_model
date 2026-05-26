@@ -1,0 +1,36 @@
+accelerate==1.7.0
+click==8.2.1
+datasets==3.6.0
+einops==0.8.1
+grpcio==1.73.0
+fsspec==2025.3.0
+huggingface-hub==0.33.0
+jieba==0.42.1
+langdetect==1.0.9
+latex2sympy2-extended==1.0.6
+lighteval[extended_tasks,multilingual] @ git+https://github.com/huggingface/lighteval.git@2788496c3ef9973a24c7d8b87ee5b2cceb430872
+more-itertools==10.7.0
+ninja==1.11.1.4
+nltk==3.9.1
+numba==0.61.2
+numpy==1.26.4
+openai==1.55.2
+outlines==0.1.11
+outlines-core==0.1.26
+pyarrow==20.0.0
+pyvi==0.1.1
+ray==2.47.1
+safetensors==0.5.3
+scipy==1.15.3
+scikit-learn==1.7.0
+sentencepiece==0.2.0
+spacy[ja,ko,th]==3.8.7
+stanza==1.10.1
+sympy==1.14.0
+tiktoken==0.9.0
+torch==2.7.0
+torchaudio==2.7.0
+torchvision==0.22.0
+transformers @ git+https://github.com/huggingface/transformers@3c18d71464871a8496162af0c6a74ed554f693a9
+triton==3.3.0
+vllm==0.9.1

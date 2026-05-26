@@ -1,0 +1,1047 @@
+datasets:
+- _comment: '# 299988 samples'
+  category: Text
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/text__magpie_pro(l3_80b_mt)_llava_onevision.json
+  modality: text
+  name: llava-onevision:magpie_pro(l3_80b_mt)
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:magpie_pro(l3_80b_mt)
+- _comment: '# 299990 samples'
+  category: Text
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/text__magpie_pro(l3_80b_st)_llava_onevision.json
+  modality: text
+  name: llava-onevision:magpie_pro(l3_80b_st)
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:magpie_pro(l3_80b_st)
+- _comment: '# 299982 samples'
+  category: Text
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/text__magpie_pro(qwen2_72b_st)_llava_onevision.json
+  modality: text
+  name: llava-onevision:magpie_pro(qwen2_72b_st)
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:magpie_pro(qwen2_72b_st)
+- _comment: '# 29827 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/text__mathqa_llava_onevision.json
+  modality: text
+  name: llava-onevision:mathqa
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:mathqa
+- _comment: '# 5280 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__CLEVR-Math(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:CLEVR-Math(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:CLEVR-Math(MathV360K)
+- _comment: '# 17587 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__FigureQA(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:FigureQA(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:FigureQA(MathV360K)
+- _comment: '# 498 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__GEOS(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:GEOS(MathV360K)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:GEOS(MathV360K)
+- _comment: '# 17162 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__GeoQA+(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:GeoQA+(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:GeoQA+(MathV360K)
+- _comment: '# 9724 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__Geometry3K(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:Geometry3K(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:Geometry3K(MathV360K)
+- _comment: '# 22589 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__IconQA(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:IconQA(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:IconQA(MathV360K)
+- _comment: '# 5225 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__MapQA(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:MapQA(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:MapQA(MathV360K)
+- _comment: '# 35948 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__PMC-VQA(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:PMC-VQA(MathV360K)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:PMC-VQA(MathV360K)
+- _comment: '# 8642 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__Super-CLEVR(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:Super-CLEVR(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:Super-CLEVR(MathV360K)
+- _comment: '# 22452 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__TabMWP(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:TabMWP(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:TabMWP(MathV360K)
+- _comment: '# 11949 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__UniGeo(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:UniGeo(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:UniGeo(MathV360K)
+- _comment: '# 263584 samples'
+  category: Science
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__VisualWebInstruct(filtered)_llava_onevision.json
+  modality: image
+  name: llava-onevision:VisualWebInstruct(filtered)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:VisualWebInstruct(filtered)
+- _comment: '# 6604 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__VizWiz(MathV360K)_llava_onevision.json
+  modality: image
+  name: llava-onevision:VizWiz(MathV360K)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:VizWiz(MathV360K)
+- _comment: '# 2429 samples'
+  category: Diagram Understanding
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__ai2d(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:ai2d(cauldron,llava_format)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:ai2d(cauldron,llava_format)
+- _comment: '# 4864 samples'
+  category: Diagram Understanding
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__ai2d(gpt4v)_llava_onevision.json
+  modality: image
+  name: llava-onevision:ai2d(gpt4v)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:ai2d(gpt4v)
+- _comment: '# 12403 samples'
+  category: Diagram Understanding
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__ai2d(internvl)_llava_onevision.json
+  modality: image
+  name: llava-onevision:ai2d(internvl)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:ai2d(internvl)
+- _comment: '# 49990 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__allava_instruct_laion4v_llava_onevision.json
+  modality: image
+  name: llava-onevision:allava_instruct_laion4v
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:allava_instruct_laion4v
+- _comment: '# 19990 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__allava_instruct_vflan4v_llava_onevision.json
+  modality: image
+  name: llava-onevision:allava_instruct_vflan4v
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:allava_instruct_vflan4v
+- _comment: '# 16534 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__aokvqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:aokvqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:aokvqa(cauldron,llava_format)
+- _comment: '# 26956 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__chart2text(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:chart2text(cauldron)
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:chart2text(cauldron)
+- _comment: '# 18260 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__chartqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:chartqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:chartqa(cauldron,llava_format)
+- _comment: '# 8825 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__chrome_writting_llava_onevision.json
+  modality: image
+  name: llava-onevision:chrome_writting
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:chrome_writting
+- _comment: '# 69995 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__clevr(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:clevr(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:clevr(cauldron,llava_format)
+- _comment: '# 295 samples'
+  category: Diagram Understanding
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__diagram_image_to_text(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:diagram_image_to_text(cauldron)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:diagram_image_to_text(cauldron)
+- _comment: '# 199995 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__dvqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:dvqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:dvqa(cauldron,llava_format)
+- _comment: '# 99995 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__figureqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:figureqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:figureqa(cauldron,llava_format)
+- _comment: '# 60242 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__geo170k(align)_llava_onevision.json
+  modality: image
+  name: llava-onevision:geo170k(align)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:geo170k(align)
+- _comment: '# 67823 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__geo170k(qa)_llava_onevision.json
+  modality: image
+  name: llava-onevision:geo170k(qa)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:geo170k(qa)
+- _comment: '# 2091 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__geo3k_llava_onevision.json
+  modality: image
+  name: llava-onevision:geo3k
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:geo3k
+- _comment: '# 9298 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__geomverse(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:geomverse(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:geomverse(cauldron)
+- _comment: '# 8495 samples'
+  category: Hateful Memes
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__hateful_memes(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:hateful_memes(cauldron,llava_format)
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:hateful_memes(cauldron,llava_format)
+- _comment: '# 2495 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__hitab(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:hitab(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:hitab(cauldron,llava_format)
+- _comment: '# 74492 samples'
+  category: Hateful Memes
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__hme100k_llava_onevision.json
+  modality: image
+  name: llava-onevision:hme100k
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:hme100k
+- _comment: '# 5658 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__iam(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:iam(cauldron)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:iam(cauldron)
+- _comment: '# 27302 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__iconqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:iconqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:iconqa(cauldron,llava_format)
+- _comment: '# 1990 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__iiit5k_llava_onevision.json
+  modality: image
+  name: llava-onevision:iiit5k
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:iiit5k
+- _comment: '# 99573 samples'
+  category: Captioning & Knowledge
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__image_textualization(filtered)_llava_onevision.json
+  modality: image
+  name: llava-onevision:image_textualization(filtered)
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:image_textualization(filtered)
+- _comment: '# 1982 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__infographic(gpt4v)_llava_onevision.json
+  modality: image
+  name: llava-onevision:infographic(gpt4v)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:infographic(gpt4v)
+- _comment: '# 4394 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__infographic_vqa_llava_onevision.json
+  modality: image
+  name: llava-onevision:infographic_vqa
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:infographic_vqa
+- _comment: '# 2113 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__infographic_vqa_llava_format_llava_onevision.json
+  modality: image
+  name: llava-onevision:infographic_vqa_llava_format
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:infographic_vqa_llava_format
+- _comment: '# 1275 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__intergps(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:intergps(cauldron,llava_format)
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:intergps(cauldron,llava_format)
+- _comment: '# 256636 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__k12_printing_llava_onevision.json
+  modality: image
+  name: llava-onevision:k12_printing
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:k12_printing
+- _comment: '# 19790 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__llavar_gpt4_20k_llava_onevision.json
+  modality: image
+  name: llava-onevision:llavar_gpt4_20k
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:llavar_gpt4_20k
+- _comment: '# 1776 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__lrv_chart_llava_onevision.json
+  modality: image
+  name: llava-onevision:lrv_chart
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:lrv_chart
+- _comment: '# 10490 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__lrv_normal(filtered)_llava_onevision.json
+  modality: image
+  name: llava-onevision:lrv_normal(filtered)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:lrv_normal(filtered)
+- _comment: '# 37412 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__mapqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:mapqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:mapqa(cauldron,llava_format)
+- _comment: '# 87348 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__mavis_math_metagen_llava_onevision.json
+  modality: image
+  name: llava-onevision:mavis_math_metagen
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:mavis_math_metagen
+- _comment: '# 99990 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__mavis_math_rule_geo_llava_onevision.json
+  modality: image
+  name: llava-onevision:mavis_math_rule_geo
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:mavis_math_rule_geo
+- _comment: '# 7614 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__multihiertt(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:multihiertt(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:multihiertt(cauldron)
+- _comment: '# 1999 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__orand_car_a_llava_onevision.json
+  modality: image
+  name: llava-onevision:orand_car_a
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:orand_car_a
+- _comment: '# 41995 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__raven(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:raven(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:raven(cauldron)
+- _comment: '# 9995 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__rendered_text(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:rendered_text(cauldron)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:rendered_text(cauldron)
+- _comment: '# 8509 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__robut_sqa(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:robut_sqa(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:robut_sqa(cauldron)
+- _comment: '# 74984 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__robut_wikisql(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:robut_wikisql(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:robut_wikisql(cauldron)
+- _comment: '# 38241 samples'
+  category: Chart & Table
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__robut_wtq(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:robut_wtq(cauldron,llava_format)
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:robut_wtq(cauldron,llava_format)
+- _comment: '# 4971 samples'
+  category: Science
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__scienceqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:scienceqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:scienceqa(cauldron,llava_format)
+- _comment: '# 19208 samples'
+  category: Science
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__scienceqa(nona_context)_llava_onevision.json
+  modality: image
+  name: llava-onevision:scienceqa(nona_context)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:scienceqa(nona_context)
+- _comment: '# 15725 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__screen2words(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:screen2words(cauldron)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:screen2words(cauldron)
+- _comment: '# 57284 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sharegpt4o_llava_onevision.json
+  modality: image
+  name: llava-onevision:sharegpt4o
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:sharegpt4o
+- _comment: '# 50017 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sharegpt4v(coco)_llava_onevision.json
+  modality: image
+  name: llava-onevision:sharegpt4v(coco)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:sharegpt4v(coco)
+- _comment: '# 1988 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sharegpt4v(knowledge)_llava_onevision.json
+  modality: image
+  name: llava-onevision:sharegpt4v(knowledge)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:sharegpt4v(knowledge)
+- _comment: '# 29990 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sharegpt4v(llava)_llava_onevision.json
+  modality: image
+  name: llava-onevision:sharegpt4v(llava)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:sharegpt4v(llava)
+- _comment: '# 8990 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sharegpt4v(sam)_llava_onevision.json
+  modality: image
+  name: llava-onevision:sharegpt4v(sam)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:sharegpt4v(sam)
+- _comment: '# 33616 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__sroie_llava_onevision.json
+  modality: image
+  name: llava-onevision:sroie
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:sroie
+- _comment: '# 17242 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__st_vqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:st_vqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:st_vqa(cauldron,llava_format)
+- _comment: '# 22717 samples'
+  category: Mathematics
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__tabmwp(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:tabmwp(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:tabmwp(cauldron)
+- _comment: '# 98675 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__tallyqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:tallyqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:tallyqa(cauldron,llava_format)
+- _comment: '# 21942 samples'
+  category: Captioning & Knowledge
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__textcaps_llava_onevision.json
+  modality: image
+  name: llava-onevision:textcaps
+  path: llava-onevision
+  quality: '0'
+  sampling_strategy: random:33%
+  source: llava-onevision:textcaps
+- _comment: '# 25104 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__textocr(gpt4v)_llava_onevision.json
+  modality: image
+  name: llava-onevision:textocr(gpt4v)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:textocr(gpt4v)
+- _comment: '# 27302 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__tqa(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:tqa(cauldron,llava_format)
+  path: llava-onevision
+  quality: '3'
+  sampling_strategy: random:33%
+  source: llava-onevision:tqa(cauldron,llava_format)
+- _comment: '# 91434 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__ureader_cap_llava_onevision.json
+  modality: image
+  name: llava-onevision:ureader_cap
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:ureader_cap
+- _comment: '# 17322 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__ureader_ie_llava_onevision.json
+  modality: image
+  name: llava-onevision:ureader_ie
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:ureader_ie
+- _comment: '# 186060 samples'
+  category: Instruction
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__vision_flan(filtered)_llava_onevision.json
+  modality: image
+  name: llava-onevision:vision_flan(filtered)
+  path: llava-onevision
+  quality: '5'
+  sampling_strategy: random:33%
+  source: llava-onevision:vision_flan(filtered)
+- _comment: '# 9964 samples'
+  category: OCR
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__vistext(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:vistext(cauldron)
+  path: llava-onevision
+  quality: '4'
+  sampling_strategy: random:33%
+  source: llava-onevision:vistext(cauldron)
+- _comment: '# 14361 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__visual7w(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:visual7w(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:visual7w(cauldron,llava_format)
+- _comment: '# 3022 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__visualmrc(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:visualmrc(cauldron)
+  path: llava-onevision
+  quality: '1'
+  sampling_strategy: random:33%
+  source: llava-onevision:visualmrc(cauldron)
+- _comment: '# 308 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__vqarad(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:vqarad(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:vqarad(cauldron,llava_format)
+- _comment: '# 2152 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__vsr(cauldron,llava_format)_llava_onevision.json
+  modality: image
+  name: llava-onevision:vsr(cauldron,llava_format)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:vsr(cauldron,llava_format)
+- _comment: '# 9995 samples'
+  category: Visual Question Answering
+  json_path: /fsx/miquel/apollo-dataset/llava-onevision/image__websight(cauldron)_llava_onevision.json
+  modality: image
+  name: llava-onevision:websight(cauldron)
+  path: llava-onevision
+  quality: '2'
+  sampling_strategy: random:33%
+  source: llava-onevision:websight(cauldron)
+
+#Mammoth blocks
+- _comment: '# 836082 samples'
+  json_path: /fsx/miquel/apollo-dataset/mammoth/mammoth_onevision_image_without_llava_onevision.json
+  category: All
+  sampling_strategy: "random:33%"
+  name: mammoth-image-no-llava-onevision
+  path: mammoth
+  modality: image
+  source: mammoth:images
+  quality: '1'
+
+
+##### MULTI-IMAGE
+- _comment: '# 349832 samples'
+  json_path: /fsx/miquel/apollo-dataset/m4-instruct-data/m4_instruct_multiimage_fixed_trimmed_less_5_images_sample.json
+  sampling_strategy: "all"
+  name: m4_instruct_multiimage
+  modality: image
+  path: m4-instruct-data
+  modality: multiimage
+  source: mammoth:images
+  quality: '5'
+  category: All
+  
+#Mammoth blocks
+- _comment: '# 476182 samples'
+  json_path: /fsx/miquel/apollo-dataset/mammoth/mammoth_onevision_multiimaged_capped_to_6_images.json
+  sampling_strategy: "random:33%"
+  name: mammoth-onevision-multiimage-cap6
+  path: mammoth
+  modality: multiimage
+  source: mammoth:images
+  quality: '2'
+  category: All
+
+
+##### VIDEO
+- _comment: '# 234419 samples'
+  json_path: /fsx/miquel/apollo-dataset/llava-video-178k/llama_video_data_all_configs_2_3_m.json
+  sampling_strategy: "random:33%"
+  name: LlamaVideo178k-2-3-m
+  path: llava-video-178k
+  modality: video
+  source: llava-video-178k:videos
+  quality: '5'
+  duration: long
+- _comment: '# 246086 samples'
+  json_path: /fsx/miquel/apollo-dataset/llava-video-178k/llama_video_data_all_configs_1_2_m.json
+  sampling_strategy: "random:33%"
+  name: LlamaVideo178k-1-2-m
+  path: llava-video-178k
+  modality: video
+  source: llava-video-178k:videos
+  quality: '5'
+  duration: medium
+- _comment: '# 617871 samples'
+  json_path: /fsx/miquel/apollo-dataset/llava-video-178k/llama_video_data_all_configs_0_30_s.json
+  sampling_strategy: "random:33%"
+  name: LlamaVideo178k-0-30-s
+  path: llava-video-178k
+  modality: video
+  source: llava-video-178k:videos
+  quality: '3'
+  duration: short
+- _comment: '# 255000 samples'
+  json_path: /fsx/miquel/apollo-dataset/llava-video-178k/llama_video_data_llava_hound_open_ended.json
+  sampling_strategy: "random:33%"
+  name: LlamaVideo178k-hound-open-ended
+  path: llava-video-178k
+  modality: video
+  source: llava-video-178k:videos
+  quality: '3'
+  duration: medium
+
+#### AUX datasets
+- _comment: '# 685 samples'
+  json_path: /fsx/miquel/apollo-dataset/finevideo/finevideo_final_qa.json
+  sampling_strategy: "random:33%"
+  name: finevideoqa
+  path: finevideo
+  modality: video
+  source: finevideo:videos
+  quality: '5'
+  duration: long
+  category: All
+
+# Video Star blocks
+- _comment: '# 1055373 samples'
+  json_path: /fsx/miquel/apollo-dataset/video-star/kinetics700_tune_under_minute.json
+  sampling_strategy: "random:33%"
+  name: videostar-kinetics700
+  path: video-star
+  modality: video
+  source: video-star:videos
+  quality: '2'
+  duration: short
+  category: All
+- _comment: '# 134091 samples'
+  json_path: /fsx/miquel/apollo-dataset/video-star/starb_tune_under_minute.json
+  sampling_strategy: "random:33%"
+  name: videostar-starb
+  path: video-star
+  modality: video
+  source: video-star:videos
+  quality: '3'
+  duration: short
+  category: All
+- _comment: '# 3336 samples'
+  json_path: /fsx/miquel/apollo-dataset/video-star/finediving_tune_under_minute.json
+  sampling_strategy: "random:33%"
+  name: videostar-finediving
+  path: video-star
+  modality: video
+  source: video-star:videos
+  quality: '1'
+  duration: short
+  category: All
+
+
+
+#Mammoth blocks
+- _comment: '# 315453 samples'
+  json_path: /fsx/miquel/apollo-dataset/mammoth/mammoth_onevision_video.json
+  sampling_strategy: "random:33%"
+  name: mammoth-onevision-video
+  path: mammoth
+  modality: video
+  duration: short
+  source: mammoth:videos
+  quality: '1'
+  category: All
+
+
+
+  # VRIPT
+- json_path: /fsx/miquel/apollo-dataset/vript/vript_long_avg_11s.json
+  _comment: '# 400040 samples'
+  sampling_strategy: "all"
+  name: vript_long
+  modality: video
+  path: vript
+  source: vript
+  category: All
+  quality: '2'
+  duration: medium
+- json_path: /fsx/miquel/apollo-dataset/vript/vript_short_avg_5s.json
+  _comment:   '# 8776 samples'
+  sampling_strategy: "all"
+  name: vript_short
+  modality: video
+  path: vript
+  source: vript
+  quality: '2'
+  duration: short
+  category: All
+
+
+
+
+# VISTA400K
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-event_relationship_mcq.json-avg-34seconds.json
+  _comment:   '# 28427 samples'
+  sampling_strategy: "all"
+  name: vista400k:event_relationship_mcq
+  modality: video
+  path: vista-400k
+  duration: short
+  source: vista400k:event_relationship_mcq
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-event_relationship_qa.json-avg-34seconds.json
+  _comment:   '# 28427 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:event_relationship_qa
+  modality: video
+  path: vista-400k
+  duration: short
+  source: vista400k:event_relationship_qa
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-hr_video_grid_mcq.json-avg-3seconds.json
+  _comment:   '# 29951 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:hr_video_grid_mcq
+  modality: video
+  path: vista-400k
+  source: vista400k:hr_video_grid_mcq
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-hr_video_grid_qa.json-avg-3seconds.json
+  _comment:   '# 29950 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:hr_video_grid_qa
+  modality: video
+  path: vista-400k
+  source: vista400k:hr_video_grid_qa
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-long_video_caption.json-avg-34seconds.json
+  _comment:   '# 58617 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:long_video_caption
+  modality: video
+  path: vista-400k
+  source: vista400k:long_video_caption
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-spatial_niah_mcq.json-avg-10seconds.json
+  _comment:   '# 29981 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:spatial_niah_mcq
+  modality: video
+  path: vista-400k
+  source: vista400k:spatial_niah_mcq
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-spatial_niah_qa.json-avg-10seconds.json
+  _comment:   '# 29997 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:spatial_niah_qa
+  modality: video
+  path: vista-400k
+  source: vista400k:spatial_niah_qa
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-spatiotemporal_niah_mcq.json-avg-90seconds.json
+  _comment:   '# 28239 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:spatialtemporal_niah_mcq
+  modality: video
+  path: vista-400k
+  source: vista400k:spatialtemporal_niah_mcq
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-temporal_niah_mcq.json-avg-68seconds.json
+  _comment:   '# 29876 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:temporal_niah_mcq
+  modality: video
+  path: vista-400k
+  source: vista400k:temporal_niah_mcq
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-temporal_niah_qa.json-avg-67seconds.json
+  _comment:   '# 27591 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:temporal_niah_qa
+  modality: video
+  path: vista-400k
+  source: vista400k:temporal_niah_qa
+  duration: short
+  category: All
+  quality: '2'
+- json_path: /fsx/miquel/apollo-dataset/vista-400k/vista400k-two_needle_niah_qa.json-avg-112seconds.json
+  _comment:   '# 52349 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: vista400k:two_needle_niah_qa
+  modality: video
+  path: vista-400k
+  quality: '2'
+  source: vista400k:two_needle_niah_qa
+  duration: short
+  category: All
+
+# Moviechat
+- json_path:  /fsx/miquel/apollo-dataset/moviechat/moviechat_descriptionqa.json
+  _comment:   '# 795 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: moviechat:descriptions
+  modality: video
+  quality: '5'
+  path: moviechat
+  source: moviechat:descriptions
+  duration: long #avg 447s
+  category: All
+
+# ShareGPT4Video
+- json_path: /fsx/miquel/apollo-dataset/ShareGPT4Video/sharegpt4video_checked_qa.json
+  _comment:   '# 28221 samples, 0.0% path validation failures'
+  sampling_strategy: "all"
+  name: ShareGPT4Video
+  modality: video
+  quality: '5'
+  path: ShareGPT4Video
+  source: ShareGPT4Video
+  duration: short #avg 28s
+  category: all
+
+
+
+  

@@ -1,0 +1,87 @@
+version: 1
+seed: 42
+
+curation:
+  languages:
+    allow:
+      - en
+      - vi
+  dedup:
+    enabled: true
+    method: exact_and_minhash
+    ngram_size: 13
+    jaccard_threshold: 0.90
+  packing:
+    enabled: true
+    max_seq_length: 4096
+  reasoning_tags:
+    strip_think_tags: true
+
+sources:
+  - id: mathinstruct
+    hf_dataset: agicorp/MathInstruct
+    split: train
+    prompt_field: instruction
+    response_field: output
+    language: en
+    weight: 0.40
+  - id: metamathqa
+    hf_dataset: meta-math/MetaMathQA
+    split: train
+    prompt_field: query
+    response_field: response
+    language: en
+    weight: 0.35
+  - id: dart_math
+    hf_dataset: hkust-nlp/dart-math-pool-math
+    split: train
+    prompt_field: question
+    response_field: answer
+    language: en
+    weight: 0.15
+  - id: scienceqa
+    hf_dataset: derek-thomas/ScienceQA
+    split: train
+    prompt_field: question
+    response_field: lecture
+    language: en
+    weight: 0.05
+  - id: sciq
+    hf_dataset: allenai/sciq
+    split: train
+    prompt_field: question
+    response_field: support
+    language: en
+    weight: 0.05
+  - id: vi_metamath_395k
+    hf_dataset: 5CD-AI/Vietnamese-395k-meta-math-MetaMathQA-gg-translated
+    split: train
+    prompt_field: query
+    response_field: response
+    language: vi
+    weight: 0.10
+  - id: vi_orca_math_200k
+    hf_dataset: 5CD-AI/Vietnamese-microsoft-orca-math-word-problems-200k-gg-translated
+    split: train
+    prompt_field: instruction
+    response_field: output
+    language: vi
+    weight: 0.07
+  - id: vi_openmathinstruct_50k
+    hf_dataset: 5CD-AI/Vietnamese-nvidia-OpenMathInstruct-1-50k-gg-translated
+    split: train
+    prompt_field: instruction
+    response_field: output
+    language: vi
+    weight: 0.06
+  - id: vi_metamath_40k
+    hf_dataset: 5CD-AI/Vietnamese-meta-math-MetaMathQA-40K-gg-translated
+    split: train
+    prompt_field: query
+    response_field: response
+    language: vi
+    weight: 0.02
+
+output:
+  manifest_name: finetune_manifest.jsonl
+  data_card_name: finetune_data_card.json

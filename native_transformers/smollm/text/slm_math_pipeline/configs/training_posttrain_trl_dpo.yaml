@@ -1,0 +1,42 @@
+run:
+  name: minicpm5_1b_en_vi_math_posttrain
+  output_dir: outputs/posttrain
+  seed: 42
+
+model:
+  model_id: outputs/finetune
+  tokenizer_id: openbmb/MiniCPM5-1B
+  trust_remote_code: true
+
+mode:
+  preferred: dpo
+  fallback: sft
+
+dpo:
+  beta: 0.1
+  max_length: 4096
+  max_prompt_length: 2048
+  learning_rate: 1.0e-5
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 32
+  max_steps: 10000
+  warmup_steps: 200
+  logging_steps: 10
+  save_steps: 500
+  bf16: true
+
+sft_fallback:
+  max_seq_length: 4096
+  learning_rate: 5.0e-5
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 32
+  max_steps: 10000
+  warmup_steps: 200
+  logging_steps: 10
+  save_steps: 500
+  bf16: true
+
+data:
+  preference_manifest_path: outputs/posttrain_manifest/posttrain_preference_manifest.jsonl
+  sft_manifest_path: outputs/posttrain_manifest/posttrain_sft_manifest.jsonl
+  strip_think_tags: true
