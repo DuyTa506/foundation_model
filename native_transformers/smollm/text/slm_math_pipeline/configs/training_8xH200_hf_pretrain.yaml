@@ -43,10 +43,10 @@ optimization:
 #   - Decay: exponential  f(s) = 0.5^((s - stable_end_step) / decay_half_life_steps)
 scheduler:
   type: warmup_stable_decay    # custom scheduler in scripts/pretrain_hf.py
-  warmup_steps: 2000
+  warmup_steps: 1000
   stable_steps: null           # auto: total_steps - warmup_steps - decay_steps
-  decay_steps: 20000           # ~10% of 200k total steps; tune per token budget
-  decay_half_life_steps: 5000  # T in MiniCPM formula (~20B tokens at 2M tok/step)
+  decay_steps: 5000            # ~10% of 50k total steps
+  decay_half_life_steps: 1250  # T in MiniCPM formula (~2.5B tokens at 2M tok/step)
   # At the start of decay phase, the data mix switches to the vi_dominant decay mix
   # defined in curation_pipeline.yaml:decay_phase_mix.
   decay_phase_data_mix: true
@@ -57,7 +57,7 @@ training:
   gradient_accumulation_steps: 8
   # global_batch_tokens ≈ micro_batch * grad_accum * num_gpus * seq_len
   # = 8 * 8 * 8 * 4096 = 2,097,152 ≈ 2M tokens/step  ✓
-  total_steps: 200000          # ~400B tokens at 2M tok/step; scale up for 1T target
+  total_steps: 50000           # ~100B tokens at 2M tok/step
   logging_steps: 10
   save_steps: 1000
   eval_steps: 5000
