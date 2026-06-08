@@ -15,16 +15,78 @@ pip install -r requirements.txt
 
 Key dependencies: `torch==2.7.0`, `transformers`, `accelerate==1.7.0`, `trl>=0.15`, `datatrove[processing]`, `lighteval`, `vllm==0.9.1`.
 
-## Commands
+## Smoke test → Scale workflow
 
-### Smoke test / sanity check
+**Always validate locally before running on the cluster.** Smoke configs are completely separate from production configs — never run `--smoke_test` against the real `training_8xH200_hf_pretrain.yaml`, it will use wrong batch/seq dimensions.
+
+### Step 1 — Grab a small corpus slice
 ```bash
-# Single-GPU smoke test for pretrain (5 steps)
-python scripts/pretrain_hf.py --config configs/training_8xH200_hf_pretrain.yaml --smoke_test
+# Download only wikipedia_vi (fast, ~500MB) for local testing
+HF_TOKEN=hf_xxx python scripts/download_datasets.py \
+  --source_ids wikipedia_vi --cache_dir /tmp/hf_cache_test
 
-# Smoke test for GRPO
+# Tokenize → .npy shards (3M tokens takes ~30s)
+python scripts/smoke_tokenize.py \
+  --tokenizer_path outputs/tokenizer \
+  --cache_dir /tmp/hf_cache_test \
+  --source_id wikipedia_vi \
+  --seq_len 512 --max_tokens 3000000 \
+  --output_dir outputs/smoke_tokenized
+```
+
+### Step 2 — Init tiny model
+```bash
+# ~20M params, fits in 4GB VRAM
+python scripts/init_model_from_scratch.py \
+  --config configs/model_tiny_smoke.yaml \
+  --tokenizer_path outputs/tokenizer \
+  --output_dir outputs/model_smoke_init
+```
+
+### Step 3 — Run 20-step pretrain
+```bash
+WORLD_SIZE=1 python scripts/pretrain_hf.py \
+  --config configs/training_smoke_test.yaml
+
+# Or 5-step quick sanity check
+WORLD_SIZE=1 python scripts/pretrain_hf.py \
+  --config configs/training_smoke_test.yaml --smoke_test
+```
+
+**Pass criteria:** initial loss ≈ `ln(64000) = 11.07` (random init), loss decreasing by step 20.
+
+### Step 3b — Test generation (optional sanity check)
+```bash
+# Single prompt (raw mode — no chat template)
+python scripts/generate.py --model outputs/smoke_train \
+  --prompt "Tính 1 + 1" --max_new_tokens 50
+
+# Interactive REPL
+python scripts/generate.py --model outputs/smoke_train
+
+# Chat mode (for SFT/RLVR checkpoints)
+python scripts/generate.py --model outputs/sft \
+  --chat --prompt "Giải phương trình x^2 - 4 = 0" --think
+```
+
+After only 20 steps the tiny model outputs gibberish — that's expected. The goal is to confirm the pipeline loads and generates without errors.
+
+### Step 4 — Scale to 4×H200
+Only after smoke test passes, switch to production configs:
+```bash
+# Init full 0.88B model
+python scripts/init_model_from_scratch.py --config configs/model_llama_1b_en_vi.yaml
+
+# Base pretrain with wandb logging
+bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml
+```
+
+### Smoke test for GRPO
+```bash
 accelerate launch scripts/launch_rl_grpo.py --config configs/training_rl_grpo.yaml --smoke_test
 ```
+
+## Commands
 
 ### Curation pipeline (stages run sequentially)
 ```bash
@@ -45,9 +107,19 @@ python scripts/curate/07_tokenize_pack.py --tokenizer_path outputs/tokenizer
 
 ### Tokenizer training (Stage 0)
 ```bash
+# Primary: read directly from HF cache (no materialization needed)
 python scripts/train_tokenizer.py \
   --config configs/tokenizer_en_vi.yaml \
-  --corpus_dirs outputs/curated/raw
+  --curation_config configs/curation_pipeline.yaml \
+  --cache_dir /data/hf_cache
+
+# Limit to specific sources or token budget for faster iteration
+python scripts/train_tokenizer.py \
+  --config configs/tokenizer_en_vi.yaml \
+  --curation_config configs/curation_pipeline.yaml \
+  --cache_dir /data/hf_cache \
+  --source_ids wikipedia_vi c4_vi \
+  --max_corpus_tokens 500000000
 ```
 
 ### Model initialization (required before pretrain)
@@ -161,15 +233,36 @@ Bạn là một trợ lý AI thông minh, thành thạo tiếng Việt và tiế
 
 | Config | Purpose |
 |---|---|
+| `model_tiny_smoke.yaml` | **Smoke test only** — ~20M param toy model, 4GB VRAM |
+| `training_smoke_test.yaml` | **Smoke test only** — 20 steps, single GPU, fp16, no wandb |
 | `curation_pipeline.yaml` | All curation settings: language ID, quality filters, dedup, decontamination, PII, data source weights, tokenization |
-| `model_llama_1b_en_vi.yaml` | Model architecture (do not use `from_pretrained`) |
+| `model_llama_1b_en_vi.yaml` | Production model architecture (do not use `from_pretrained`) |
 | `tokenizer_en_vi.yaml` | Tokenizer training (byte-level BPE, VI:EN ~60:40) |
-| `training_8xH200_hf_pretrain.yaml` | Base pretrain on 8×H200, FSDP, WSD scheduler |
+| `training_8xH200_hf_pretrain.yaml` | **Production** base pretrain on 4–8×H200, FSDP, WSD, wandb |
 | `training_longctx_{16,32,64,128}k.yaml` | Context extension stages |
 | `training_midtrain.yaml` | Optional math/VI mid-training |
 | `training_finetune_trl_sft.yaml` | SFT via TRL `SFTTrainer` |
 | `training_rl_grpo.yaml` | GRPO/RLVR via TRL `GRPOTrainer` + vLLM rollouts |
 | `datasets_en_vi_math_{pretrain,posttrain,finetune}.yaml` | Data manifests per stage |
+
+## Logging
+
+```yaml
+# configs/training_8xH200_hf_pretrain.yaml
+logging:
+  report_to: wandb              # or: tensorboard  or: wandb,tensorboard
+  wandb_project: slm_math_vi
+  wandb_run_name: llama_1b_en_vi_pretrain
+```
+
+`--smoke_test` always forces `report_to: none` regardless of config. `WANDB_PROJECT` / `WANDB_NAME` env vars are set automatically from config fields before Trainer init. Tensorboard logs land in `{output_dir}/tensorboard/`.
+
+## Known GPU constraints
+
+- **Turing (GTX 1650 Ti, RTX 20xx)**: fp16 only, no bfloat16. Use `fp16: true` in training config.
+- **Ampere+ (A100, H100, H200)**: bfloat16 preferred. Use `bf16: true`.
+- `pretrain_hf.py` loads model in float32 and lets HF Trainer handle AMP. **Do not** set `torch_dtype=float16` when calling `from_pretrained` — it breaks the grad scaler.
+- Older torch (2.5.x / cu121 for CUDA 12.2) requires `transformers==4.47.x`. torch 2.7.0 (cu126+) works with latest transformers.
 
 ## Gated HuggingFace datasets
 

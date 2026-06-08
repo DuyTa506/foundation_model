@@ -84,5 +84,15 @@ checkpointing:
   load_scheduler_state: true
 
 logging:
-  report_to: wandb
+  report_to: wandb              # options: wandb | tensorboard | none (comma-sep for both)
+  wandb_project: slm_math_vi
+  wandb_run_name: llama_1b_en_vi_pretrain
   log_tokens_per_sec: true     # critical throughput metric
+
+health_monitor:
+  spike_factor: 1.5            # warn if loss > ema × 1.5
+  ema_alpha: 0.05              # slower EMA for long runs
+  plateau_window: 200          # ~1k steps of no progress triggers warning
+  plateau_min_delta: 0.005
+  vanish_thresh: 1.0e-4
+  explode_thresh: 100.0

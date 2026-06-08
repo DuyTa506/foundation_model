@@ -1,0 +1,28 @@
+# Toy model for smoke-testing the training pipeline on a 4GB GPU.
+# ~20M parameters — fits easily in 4GB with batch_size=4, seq=512.
+# Same architecture style as model_llama_1b_en_vi.yaml but tiny dims.
+# DO NOT use from_pretrained — always init via init_model_from_scratch.py.
+
+model:
+  model_type: llama
+  hidden_size: 256
+  intermediate_size: 768       # 3× hidden (standard ratio)
+  num_hidden_layers: 4
+  num_attention_heads: 4
+  num_key_value_heads: 2       # GQA
+  head_dim: 64                 # 4 heads × 64 = 256 = hidden_size
+  rms_norm_eps: 1.0e-6
+  rope_theta: 10000.0
+  rope_scaling: null
+  max_position_embeddings: 2048
+  tie_word_embeddings: true    # saves 16M params (64K × 256) — important at tiny scale
+  vocab_size: 64000
+  attention_bias: false
+  mlp_bias: false
+  hidden_act: silu
+  initializer_range: 0.02
+  use_cache: true
+
+dtype: float16                 # fp16 safe on any GPU; use bfloat16 if Ampere+
+
+output_dir: outputs/model_smoke_init

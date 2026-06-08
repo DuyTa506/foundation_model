@@ -29,6 +29,7 @@ safetensors==0.5.3
 pyyaml
 tqdm
 wandb
+tensorboard                    # alternative to wandb; set report_to: tensorboard in config
 bitsandbytes
 deepspeed
 

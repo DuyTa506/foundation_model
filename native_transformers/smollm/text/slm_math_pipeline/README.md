@@ -165,6 +165,42 @@ python scripts/curate/07_tokenize_pack.py \
   --tokenizer_path outputs/tokenizer
 ```
 
+### Local smoke test (before scaling)
+
+Validate the full pipeline on any GPU — including 4GB laptops — before committing to cluster runs. Smoke configs are isolated; they never touch production configs.
+
+```bash
+# 1. Download a small corpus slice (wikipedia_vi, ~500MB)
+HF_TOKEN=hf_xxx python scripts/download_datasets.py \
+  --source_ids wikipedia_vi --cache_dir /tmp/hf_cache_test
+
+# 2. Tokenize → packed .npy shards
+python scripts/smoke_tokenize.py \
+  --tokenizer_path outputs/tokenizer \
+  --cache_dir /tmp/hf_cache_test \
+  --source_id wikipedia_vi \
+  --seq_len 512 --max_tokens 3000000 \
+  --output_dir outputs/smoke_tokenized
+
+# 3. Init ~20M param toy model
+python scripts/init_model_from_scratch.py \
+  --config configs/model_tiny_smoke.yaml \
+  --tokenizer_path outputs/tokenizer \
+  --output_dir outputs/model_smoke_init
+
+# 4. Run 20-step training (or --smoke_test for 5 steps)
+WORLD_SIZE=1 python scripts/pretrain_hf.py \
+  --config configs/training_smoke_test.yaml
+```
+
+**Pass criteria:** initial loss ≈ `ln(64000) = 11.07`, loss decreasing by step 20, checkpoint saved to `outputs/smoke_train/`.
+
+```bash
+# 5. Quick generation test (expect gibberish after 20 steps — pipeline check only)
+python scripts/generate.py --model outputs/smoke_train \
+  --prompt "Tính 1 + 1" --max_new_tokens 50
+```
+
 ### Stage 2 — Init model + Pretrain
 
 ```bash
@@ -220,6 +256,35 @@ accelerate launch scripts/launch_finetune_trl_sft.py \
 ```bash
 accelerate launch scripts/launch_rl_grpo.py \
   --config configs/training_rl_grpo.yaml
+```
+
+### Generate / test model output
+
+```bash
+# Single prompt — raw mode (pretrain checkpoint)
+python scripts/generate.py \
+  --model outputs/pretrain \
+  --prompt "Định lý Pythagoras phát biểu rằng" \
+  --max_new_tokens 200
+
+# Chat mode — wrap in ChatML template (SFT/RLVR checkpoint)
+python scripts/generate.py \
+  --model outputs/sft \
+  --chat \
+  --prompt "Giải phương trình x^2 - 5x + 6 = 0"
+
+# With thinking enabled (hybrid-thinking SFT/RLVR checkpoint)
+python scripts/generate.py \
+  --model outputs/rl \
+  --chat --think \
+  --prompt "Chứng minh rằng căn bậc hai của 2 là số vô tỉ"
+
+# Interactive REPL (Ctrl+C to exit)
+python scripts/generate.py --model outputs/rl --chat --think
+
+# Greedy decoding (deterministic output)
+python scripts/generate.py --model outputs/sft --chat \
+  --prompt "1 + 1 = ?" --greedy --max_new_tokens 50
 ```
 
 ### Stage 6 — Eval
@@ -293,6 +358,24 @@ Với các câu hỏi toán học hoặc khoa học, hãy trình bày từng bư
 ```
 
 Thinking toggled via `enable_thinking=True/False` in `apply_chat_template`.
+
+---
+
+## Logging
+
+Training logs to **wandb** by default on production runs. Change `report_to` in the config to switch:
+
+```yaml
+# configs/training_8xH200_hf_pretrain.yaml → logging section
+logging:
+  report_to: wandb              # wandb | tensorboard | wandb,tensorboard | none
+  wandb_project: slm_math_vi
+  wandb_run_name: llama_1b_en_vi_pretrain
+```
+
+- `--smoke_test` always disables remote logging regardless of config.
+- Tensorboard logs land in `{output_dir}/tensorboard/`; view with `tensorboard --logdir outputs/pretrain/tensorboard`.
+- `wandb_project` / `wandb_run_name` in config are passed as env vars before Trainer init — no separate wandb login config needed.
 
 ---
 

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Iterator
 
 import yaml
+from transformers.trainer_callback import TrainerCallback
 
 
 # ─── WSD LR Scheduler ─────────────────────────────────────────────────────────
@@ -126,6 +127,42 @@ class PackedTokenDataset:
 
 # ─── Trainer callbacks ────────────────────────────────────────────────────────
 
+class MetricsFileCallback(TrainerCallback):
+    """
+    Writes step metrics to {output_dir}/metrics.log (one line per logging step).
+    Plain text, tail-f friendly. Not affected by tqdm carriage-return overwriting.
+    Format: step=NNN  loss=X.XXXX  grad_norm=X.XXXX  lr=X.Xe-XX  tok/s=NNNN
+    """
+
+    def __init__(self, output_dir: str):
+        self._path = Path(output_dir) / "metrics.log"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._path, "w") as f:
+            f.write("# step  loss  grad_norm  lr  tokens_per_sec\n")
+        print(f"[metrics] writing to {self._path}  (tail -f to follow)")
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        step = state.global_step
+        loss = logs.get("loss", "")
+        grad = logs.get("grad_norm", "")
+        lr   = logs.get("learning_rate", "")
+        tps  = logs.get("tokens_per_sec", "")
+
+        parts = [f"step={step:6d}"]
+        if loss != "":
+            parts.append(f"loss={float(loss):.4f}")
+        if grad != "":
+            parts.append(f"grad={float(grad):.4f}")
+        if lr != "":
+            parts.append(f"lr={float(lr):.2e}")
+        if tps != "":
+            parts.append(f"tok/s={int(tps)}")
+
+        with open(self._path, "a") as f:
+            f.write("  ".join(parts) + "\n")
+
 class TokensPerSecCallback:
     """Log tokens/sec every N steps."""
 
@@ -148,6 +185,97 @@ class TokensPerSecCallback:
             logs["tokens_per_sec"] = tps
         self._t0 = time.time()
         self._step0 = state.global_step
+
+
+class TrainingHealthCallback(TrainerCallback):
+    """
+    Monitors training health every step and prints warnings for:
+      - NaN / Inf loss
+      - Loss spike  (loss > ema * spike_factor)
+      - Loss plateau (no improvement over plateau_window steps)
+      - Vanishing gradient (grad_norm < vanish_thresh)
+      - Exploding gradient (grad_norm > explode_thresh, or NaN)
+    Stops training on NaN loss or gradient NaN.
+    """
+
+    def __init__(
+        self,
+        spike_factor: float = 1.5,       # loss > ema × factor → spike warning
+        ema_alpha: float = 0.1,           # smoothing for loss EMA
+        plateau_window: int = 50,         # steps with < min_delta improvement
+        plateau_min_delta: float = 0.01,
+        vanish_thresh: float = 1e-4,      # grad_norm below this → vanishing
+        explode_thresh: float = 100.0,    # grad_norm above this → exploding
+    ):
+        self.spike_factor = spike_factor
+        self.alpha = ema_alpha
+        self.plateau_window = plateau_window
+        self.plateau_min_delta = plateau_min_delta
+        self.vanish_thresh = vanish_thresh
+        self.explode_thresh = explode_thresh
+
+        self._ema_loss: float | None = None
+        self._recent_losses: list[float] = []
+        self._warned_plateau = False
+
+    def _fmt(self, step: int, tag: str, msg: str) -> str:
+        return f"\n{'!'*5} [health:{tag}] step={step}  {msg} {'!'*5}\n"
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        import math
+
+        if logs is None:
+            return
+        loss = logs.get("loss")
+        grad_norm = logs.get("grad_norm")
+        step = state.global_step
+
+        # ── Loss checks ──────────────────────────────────────────────────────
+        if loss is not None:
+            if math.isnan(loss) or math.isinf(loss):
+                print(self._fmt(step, "NaN", f"loss={loss}  STOPPING TRAINING"))
+                control.should_training_stop = True
+                return
+
+            # EMA update
+            if self._ema_loss is None:
+                self._ema_loss = loss
+            else:
+                self._ema_loss = self.alpha * loss + (1 - self.alpha) * self._ema_loss
+
+            # Spike detection (skip first few steps while EMA warms up)
+            if step > 5 and loss > self._ema_loss * self.spike_factor:
+                print(self._fmt(step, "SPIKE",
+                    f"loss={loss:.4f}  ema={self._ema_loss:.4f}  "
+                    f"ratio={loss/self._ema_loss:.2f}×"))
+
+            # Plateau detection
+            self._recent_losses.append(loss)
+            if len(self._recent_losses) > self.plateau_window:
+                self._recent_losses.pop(0)
+            if len(self._recent_losses) == self.plateau_window:
+                best_early = min(self._recent_losses[: self.plateau_window // 2])
+                best_late  = min(self._recent_losses[self.plateau_window // 2 :])
+                if best_early - best_late < self.plateau_min_delta and not self._warned_plateau:
+                    print(self._fmt(step, "PLATEAU",
+                        f"loss unchanged over last {self.plateau_window} steps  "
+                        f"(best_early={best_early:.4f}  best_late={best_late:.4f})"))
+                    self._warned_plateau = True
+                elif best_early - best_late >= self.plateau_min_delta:
+                    self._warned_plateau = False  # reset if progress resumes
+
+        # ── Gradient checks ───────────────────────────────────────────────────
+        if grad_norm is not None:
+            if math.isnan(grad_norm) or math.isinf(grad_norm):
+                print(self._fmt(step, "GRAD-NaN", f"grad_norm={grad_norm}  STOPPING TRAINING"))
+                control.should_training_stop = True
+            elif grad_norm < self.vanish_thresh:
+                print(self._fmt(step, "VANISHING",
+                    f"grad_norm={grad_norm:.2e}  (threshold={self.vanish_thresh:.0e})"))
+            elif grad_norm > self.explode_thresh:
+                print(self._fmt(step, "EXPLODING",
+                    f"grad_norm={grad_norm:.1f}  (threshold={self.explode_thresh})  "
+                    f"check grad_clip in config"))
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -185,9 +313,12 @@ def main() -> None:
         from transformers import AutoModelForCausalLM
 
         # Load from the random-init checkpoint (NOT from HF hub; always local)
+        # HF Trainer manages mixed precision internally — always load model in float32.
+        # fp16/bf16 flags in TrainingArguments handle AMP; loading in fp16 directly
+        # causes grad scaler to fail ("Attempting to unscale FP16 gradients").
         model = AutoModelForCausalLM.from_pretrained(
             str(init_ckpt),
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float32,
             local_files_only=True,  # never pull from hub
         )
     else:
@@ -236,6 +367,23 @@ def main() -> None:
     ckpt_cfg = cfg.get("checkpointing", {})
     log_cfg = cfg.get("logging", {})
 
+    # ── Logging backend setup ─────────────────────────────────────────────────
+    report_to = log_cfg.get("report_to", "none")
+    # smoke_test always disables remote logging
+    if args.smoke_test:
+        report_to = "none"
+
+    if "wandb" in str(report_to):
+        import os as _os
+        _os.environ.setdefault("WANDB_PROJECT", log_cfg.get("wandb_project", "slm_math_vi"))
+        _run_name = log_cfg.get("wandb_run_name") or cfg["run"].get("name")
+        if _run_name:
+            _os.environ.setdefault("WANDB_NAME", _run_name)
+
+    if "tensorboard" in str(report_to):
+        tb_dir = str(Path(out_dir) / "tensorboard")
+        print(f"[pretrain] tensorboard logdir: {tb_dir}  (run: tensorboard --logdir {tb_dir})")
+
     training_args = TrainingArguments(
         output_dir=out_dir,
         overwrite_output_dir=False,
@@ -251,17 +399,18 @@ def main() -> None:
         max_grad_norm=opt_cfg["grad_clip"],
         lr_scheduler_type="constant",  # WSD handled manually below
         warmup_steps=0,               # WSD handled manually
-        bf16=train_cfg.get("bf16", True),
-        fp16=False,
+        bf16=train_cfg.get("bf16", False),
+        fp16=train_cfg.get("fp16", False),
         logging_steps=train_cfg.get("logging_steps", 10),
         save_steps=train_cfg.get("save_steps", 1000),
         save_total_limit=ckpt_cfg.get("save_total_limit", 5),
         dataloader_num_workers=4,
         dataloader_pin_memory=True,
         gradient_checkpointing=train_cfg.get("gradient_checkpointing", False),
-        report_to=log_cfg.get("report_to", "none"),
-        run_name=cfg["run"].get("name"),
+        report_to=report_to,
+        run_name=log_cfg.get("wandb_run_name") or cfg["run"].get("name"),
         seed=cfg["run"].get("seed", 42),
+        logging_dir=str(Path(out_dir) / "tensorboard"),  # used when report_to=tensorboard
         # FSDP is configured via accelerate config, not here
     )
 
@@ -329,12 +478,24 @@ def main() -> None:
         min_l=opt_cfg["min_learning_rate"],
     )
 
+    health_cfg = cfg.get("health_monitor", {})
+    health_cb = TrainingHealthCallback(
+        spike_factor=health_cfg.get("spike_factor", 1.5),
+        ema_alpha=health_cfg.get("ema_alpha", 0.1),
+        plateau_window=health_cfg.get("plateau_window", 50),
+        plateau_min_delta=health_cfg.get("plateau_min_delta", 0.01),
+        vanish_thresh=health_cfg.get("vanish_thresh", 1e-4),
+        explode_thresh=health_cfg.get("explode_thresh", 100.0),
+    )
+
+    metrics_cb = MetricsFileCallback(out_dir)
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         data_collator=default_data_collator,
-        callbacks=[wsd_cb, TokPerSecCallback()],
+        callbacks=[wsd_cb, TokPerSecCallback(), health_cb, metrics_cb],
     )
 
     # ── Verify initial loss is ~ln(vocab_size) ───────────────────────────────
