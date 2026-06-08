@@ -37,7 +37,7 @@ optimization:
   grad_clip: 1.0
 
 # ── WSD LR Scheduler ─────────────────────────────────────────────────────────
-# Warmup-Stable-Decay (MiniCPM recipe):
+# Warmup-Stable-Decay :
 #   - Warmup: linear ramp to peak_learning_rate
 #   - Stable: constant at peak_learning_rate
 #   - Decay: exponential  f(s) = 0.5^((s - stable_end_step) / decay_half_life_steps)
