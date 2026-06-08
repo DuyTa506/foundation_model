@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top_p", type=float, default=0.9)
     p.add_argument("--repetition_penalty", type=float, default=1.1)
     p.add_argument("--greedy", action="store_true", help="Greedy decoding (temp=0).")
+    p.add_argument("--ignore_eos", action="store_true",
+                   help="Don't stop at EOS — useful for undertrained/smoke models.")
     p.add_argument("--device", default="auto", help="cuda | cpu | auto")
     return p
 
@@ -112,7 +114,7 @@ def generate(model, tok, text: str, args, device: str) -> str:
         max_new_tokens=args.max_new_tokens,
         repetition_penalty=args.repetition_penalty,
         pad_token_id=tok.eos_token_id,
-        eos_token_id=tok.eos_token_id,
+        eos_token_id=None if args.ignore_eos else tok.eos_token_id,
     )
     if args.greedy:
         gen_kwargs["do_sample"] = False
@@ -125,7 +127,13 @@ def generate(model, tok, text: str, args, device: str) -> str:
         out = model.generate(**gen_kwargs)
 
     new_tokens = out[0][input_len:]
-    return tok.decode(new_tokens, skip_special_tokens=True)
+    # skip_special_tokens=False so we can see EOS if model outputs it immediately
+    decoded = tok.decode(new_tokens, skip_special_tokens=False)
+    # Show <eos> explicitly if that's all we got (helps diagnose early-EOS issue)
+    if not decoded.strip() or decoded.strip() in (tok.eos_token or "", "</s>", "<|endoftext|>"):
+        eos = tok.eos_token or "<eos>"
+        decoded = f"[model output: {eos} only — likely overfit/undertrained]"
+    return decoded
 
 
 def run_once(model, tok, args, device: str, prompt: str) -> None:
