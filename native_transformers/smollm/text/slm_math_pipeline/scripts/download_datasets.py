@@ -31,24 +31,47 @@ from pathlib import Path
 import yaml
 
 
-# Approximate compressed sizes (GB) for planning — rough estimates only.
-# Actual download size depends on the subset/split requested.
+# Sizes of the actual subset being pulled (after name/subset filtering, before split slicing).
+# split slicing (e.g. train[:35%]) is applied on top in estimate_size_gb().
 APPROX_SIZES_GB = {
     # Vietnamese
-    "epfml/FineWeb2-HQ": 500,                    # vie_Latn subset only ~10-20 GB
-    "uonlp/CulturaX": 300,                       # vi subset only ~8 GB
+    "epfml/FineWeb2-HQ": 15,               # vie_Latn subset
+    "uonlp/CulturaX": 8,                   # vi subset
     "VTSNLP/vietnamese_curated_dataset": 2,
-    "wikimedia/wikipedia": 20,                    # vi subset only ~0.5 GB
-    "Symato/c4_vi-filtered_200GB": 50,           # filtered VI C4 ~20-50 GB
+    "wikimedia/wikipedia": 0.5,            # vi subset
+    "Symato/c4_vi-filtered_200GB": 200,    # full dataset; split-sliced in config
     "Symato/madlad-400_vi": 8,
     "Symato/hplt-vi": 6,
-    # English math+science (no general web)
-    "HuggingFaceTB/finemath": 200,               # 4plus subset only ~25 GB
-    "open-web-math/open-web-math": 30,
-    "openbmb/UltraData-Math": 10,
-    "HuggingFaceFW/fineweb-edu": 200,            # sample-10BT ~25 GB
+    # English math+science
+    "HuggingFaceTB/finemath": 25,          # finemath-4plus subset
+    "open-web-math/open-web-math": 25,
+    "openbmb/UltraData-Math": 5,           # L2-preview subset
+    "HuggingFaceFW/fineweb-edu": 25,       # sample-10BT subset
     "allenai/peS2o": 40,
 }
+
+
+def parse_split_fraction(split: str) -> float:
+    """Return the fraction of data selected by a split string.
+    'train' -> 1.0,  'train[:35%]' -> 0.35,  'train[10%:50%]' -> 0.40
+    """
+    import re
+    # [:N%]
+    m = re.search(r'\[:(\d+(?:\.\d+)?)%\]', split)
+    if m:
+        return float(m.group(1)) / 100.0
+    # [N%:M%]
+    m = re.search(r'\[(\d+(?:\.\d+)?)%:(\d+(?:\.\d+)?)%\]', split)
+    if m:
+        return (float(m.group(2)) - float(m.group(1))) / 100.0
+    return 1.0
+
+
+def estimate_size_gb(hf_dataset: str, split: str) -> float | None:
+    base = APPROX_SIZES_GB.get(hf_dataset)
+    if base is None:
+        return None
+    return base * parse_split_fraction(split)
 
 
 def parse_sources(cfg: dict) -> list[dict]:
@@ -82,9 +105,9 @@ def download_source(src: dict, cache_dir: Path, hf_token: str | None) -> dict:
 
     print(f"\n[{src['source_id']}] {hf_dataset}"
           f"{f' ({subset})' if subset else ''} split={split}")
-    approx = APPROX_SIZES_GB.get(hf_dataset)
+    approx = estimate_size_gb(hf_dataset, split)
     if approx:
-        print(f"  estimated size: ~{approx} GB (full dataset; subset may be smaller)")
+        print(f"  estimated size: ~{approx:.1f} GB")
 
     t0 = time.time()
     status = {"source_id": src["source_id"], "hf_dataset": hf_dataset,
@@ -168,16 +191,20 @@ def main() -> None:
 
     print(f"Sources to download: {len(sources)}")
     total_approx = sum(
-        APPROX_SIZES_GB.get(s["hf_dataset"], 0) for s in sources
+        estimate_size_gb(s["hf_dataset"], s["split"]) or 0 for s in sources
     )
-    print(f"Rough total size estimate: ~{total_approx} GB (full datasets; subsets are smaller)")
+    print(f"Estimated total download: ~{total_approx:.0f} GB")
     print()
 
+    col = max(len(s["source_id"]) for s in sources)
     for s in sources:
-        label = f"{s['source_id']}  {s['hf_dataset']}"
         subset_str = f" [{s['subset']}]" if s["subset"] else ""
-        size_str = f"  ~{APPROX_SIZES_GB[s['hf_dataset']]} GB" if s["hf_dataset"] in APPROX_SIZES_GB else ""
-        print(f"  {'SKIP' if args.dry_run else '    '}  {label}{subset_str}{size_str}")
+        split_str = s["split"] if s["split"] != "train" else ""
+        size = estimate_size_gb(s["hf_dataset"], s["split"])
+        size_str = f"  ~{size:.1f} GB" if size else ""
+        tag = "SKIP" if args.dry_run else "    "
+        print(f"  {tag}  {s['source_id']:{col}s}  {s['hf_dataset']}{subset_str}"
+              f"  {split_str}{size_str}")
 
     if args.dry_run:
         print("\n--dry_run: no downloads performed.")
