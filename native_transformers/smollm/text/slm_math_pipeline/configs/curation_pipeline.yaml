@@ -88,7 +88,7 @@ sources:
     split: train
     text_field: text
     language: vi
-    weight: 0.38
+    weight: 0.28
     role: vi_hq_web
     note: "Highest-quality VI web; basis for Ultra-FineWeb-VI classifier seeds"
 
@@ -123,7 +123,7 @@ sources:
     split: train
     text_field: text
     language: vi
-    weight: 0.10
+    weight: 0.20
     role: vi_hq_web
     note: "Filtered Vietnamese C4 — large and diverse VI web corpus"
 
