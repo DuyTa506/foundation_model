@@ -115,7 +115,7 @@ sources:
     split: train
     text_field: text
     language: vi
-    weight: 0.05
+    weight: 0.01
     role: vi_curated
 
   - id: c4_vi
@@ -123,7 +123,7 @@ sources:
     split: train
     text_field: text
     language: vi
-    weight: 0.20
+    weight: 0.24
     role: vi_hq_web
     note: "Filtered Vietnamese C4 — large and diverse VI web corpus"
 
