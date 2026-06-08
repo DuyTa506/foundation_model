@@ -50,7 +50,7 @@ APPROX_SIZES_GB = {
 def parse_sources(cfg: dict) -> list[dict]:
     """Extract all non-null HF dataset sources from curation config."""
     sources = []
-    for src in cfg.get("data_sources", {}).get("sources", []):
+    for src in cfg.get("sources", []):
         hf = src.get("hf_dataset")
         if not hf:
             continue
