@@ -209,26 +209,40 @@ python scripts/init_model_from_scratch.py \
   --config configs/model_llama_1b_en_vi.yaml
 
 # Base pretrain: context 4096, WSD scheduler, ~100B tokens (50k steps × 2M tok/step)
+# --gpu_ids selects which GPUs to use (e.g. 4,5,6,7 if others are busy)
 bash scripts/launch_pretrain_hf.sh \
-  --config configs/training_8xH200_hf_pretrain.yaml
+  --config configs/training_8xH200_hf_pretrain.yaml \
+  --gpu_ids 4,5,6,7
 
-# Context extension: 4k -> 16k (ABF)
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml
+# Download long-context + mid-train data BEFORE the next stages
+python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache --dry_run  # preview
+HF_TOKEN=hf_xxx python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache
 
-# Context extension: 16k -> 32k (ABF)
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml
-
-# Context extension: 32k -> 64k (YaRN)
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml
-
-# Context extension: 64k -> 128k (YaRN)
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml
+# Context extension — run IN ORDER, never skip stages
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml --gpu_ids 4,5,6,7
 ```
+
+**GPU selection:** configs default to `gpus_per_node: 4`. Override at launch:
+```bash
+--gpu_ids 4,5,6,7    # specific IDs (sets CUDA_VISIBLE_DEVICES)
+--gpu_ids 0,1,2,3    # different 4 GPUs
+--gpus 6             # first 6 GPUs (IDs 0-5)
+```
+
+`gradient_accumulation_steps` in each config is pre-calibrated so global batch tokens stay
+constant at any GPU count. If switching to 8 GPUs, halve each config's `gradient_accumulation_steps`.
 
 ### Stage 3 — Mid-training (optional)
 
 ```bash
-bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml
+# download_longctx_datasets.py covers mid-train data too (stages: midtrain)
+HF_TOKEN=hf_xxx python scripts/download_longctx_datasets.py \
+  --stages midtrain --cache_dir /data/hf_cache
+
+bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml --gpu_ids 4,5,6,7
 ```
 
 ### Stage 4 — SFT (hybrid-thinking)

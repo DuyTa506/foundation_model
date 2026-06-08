@@ -157,16 +157,21 @@ python scripts/init_model_from_scratch.py --config configs/model_llama_1b_en_vi.
 ### Pretraining
 ```bash
 # Base pretrain (4096 context, WSD scheduler)
-bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml
+bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml \
+  --gpu_ids 4,5,6,7
+
+# REQUIRED: download long-context + mid-train data before the stages below
+python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache
+python scripts/download_longctx_datasets.py --dry_run   # preview sizes first
 
 # Context extension — must run in order (skipping stages is unstable)
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml   # ABF 4k→16k
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml   # ABF 16k→32k
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml   # YaRN 32k→64k
-bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml  # YaRN 64k→128k
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml  --gpu_ids 4,5,6,7
+bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml --gpu_ids 4,5,6,7
 
-# Mid-training (optional math/VI strengthening)
-bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml
+# Mid-training (optional math/VI strengthening) — also needs download_longctx_datasets.py
+bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml --gpu_ids 4,5,6,7
 ```
 
 ### SFT and RLVR
