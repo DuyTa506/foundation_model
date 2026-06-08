@@ -3,29 +3,40 @@
 Train a from-scratch byte-level BPE tokenizer for Vietnamese + English.
 
 Usage:
-    python scripts/train_tokenizer.py --config configs/tokenizer_en_vi.yaml
+    # Primary: read directly from HF datasets cache (no materialize step needed)
+    python scripts/train_tokenizer.py \
+        --config configs/tokenizer_en_vi.yaml \
+        --curation_config configs/curation_pipeline.yaml \
+        --cache_dir /data/hf_cache
+
+    # Legacy: read from pre-materialized .jsonl/.txt files
+    python scripts/train_tokenizer.py \
+        --config configs/tokenizer_en_vi.yaml \
+        --corpus_dirs outputs/curated/raw
 
 Outputs (under output_dir from config):
-    tokenizer.json            # HF PreTrainedTokenizerFast-compatible
+    tokenizer.json            HF PreTrainedTokenizerFast-compatible
     tokenizer_config.json
     special_tokens_map.json
-    chat_template.jinja       # ChatML with conditional <think> rendering
-    tokenizer_card.json       # fertility report per language
+    chat_template.jinja
+    tokenizer_card.json       fertility report per language
 
 Design notes:
 - Byte-level BPE: zero <unk> on any Unicode, including all VI diacritics.
 - NFC normalization only — never NFKC (NFKC strips combining diacritics
-  like tone marks that are critical for Vietnamese).
+  critical for Vietnamese tone marks).
 - individual_digits=True pre-tokenizer: 123 -> 1 2 3 for math.
-- VI-prioritized training corpus (vi_ratio ~0.60) so VI gets the richest
-  subword merges and lowest tokens/word (fertility).
-- Special tokens added as atomic vocab entries (never split by BPE).
+- VI-prioritized training corpus (vi_ratio ~0.60) so VI gets richer merges.
+- Each source is budget-capped by weight so no single dataset dominates.
+- Round-robin interleaving ensures VI and EN are mixed throughout training
+  (matters for BPE since merge decisions reflect the distribution seen so far).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import unicodedata
 from pathlib import Path
 from typing import Iterator
@@ -33,7 +44,7 @@ from typing import Iterator
 import yaml
 
 
-# ─── Chat template (ChatML with <think> support) ─────────────────────────────
+# ─── Chat template ────────────────────────────────────────────────────────────
 
 CHAT_TEMPLATE_JINJA = """\
 {#-
@@ -70,7 +81,7 @@ CHAT_TEMPLATE_JINJA = """\
 """
 
 
-# ─── Corpus iterator ─────────────────────────────────────────────────────────
+# ─── Legacy corpus iterator (.jsonl / .txt files) ─────────────────────────────
 
 def _iter_jsonl(path: Path) -> Iterator[str]:
     with path.open("r", encoding="utf-8") as f:
@@ -99,13 +110,132 @@ def _iter_txt(path: Path) -> Iterator[str]:
             yield unicodedata.normalize("NFC", "".join(buf))
 
 
-def corpus_iterator(corpus_dirs: list[Path]) -> Iterator[str]:
-    """Yield text strings from a list of directories containing .jsonl or .txt files."""
+def corpus_iterator_from_dirs(corpus_dirs: list[Path]) -> Iterator[str]:
     for d in corpus_dirs:
         for p in sorted(d.rglob("*.jsonl")):
             yield from _iter_jsonl(p)
         for p in sorted(d.rglob("*.txt")):
             yield from _iter_txt(p)
+
+
+# ─── HF dataset iterator (primary path) ───────────────────────────────────────
+
+# Rough chars-per-token estimate for budget calculation.
+# Used to convert token budget → char budget per source.
+_CHARS_PER_TOKEN = {"vi": 4.0, "en": 4.5, "default": 4.5}
+
+
+def _iter_hf_source(
+    src: dict,
+    max_chars: int,
+    cache_dir: str | None,
+    hf_token: str | None,
+    shuffle_seed: int = 42,
+) -> Iterator[str]:
+    """Stream NFC-normalized text from one HF dataset source, capped at max_chars."""
+    from datasets import load_dataset
+
+    hf_dataset = src["hf_dataset"]
+    split = src.get("split", "train")
+    text_field = src.get("text_field", "text")
+
+    load_kwargs: dict = dict(
+        path=hf_dataset,
+        split=split,
+        streaming=True,
+        token=hf_token,
+    )
+    if src.get("subset"):
+        load_kwargs["name"] = src["subset"]
+    if cache_dir:
+        load_kwargs["storage_options"] = {"hf_token": hf_token}
+
+    try:
+        ds = load_dataset(**load_kwargs)
+        # Shuffle within streaming buffer for diversity
+        ds = ds.shuffle(seed=shuffle_seed, buffer_size=10_000)
+    except Exception as e:
+        print(f"  [warn] could not load {hf_dataset}: {e} — skipping")
+        return
+
+    chars_yielded = 0
+    for row in ds:
+        text = row.get(text_field) or row.get("text") or row.get("content") or ""
+        if not isinstance(text, str) or len(text) < 50:
+            continue
+        text = unicodedata.normalize("NFC", text)
+        yield text
+        chars_yielded += len(text)
+        if chars_yielded >= max_chars:
+            break
+
+
+def build_balanced_iterator(
+    tokenizer_cfg: dict,
+    curation_cfg: dict,
+    cache_dir: str | None,
+    hf_token: str | None,
+) -> Iterator[str]:
+    """
+    Build a VI/EN balanced corpus iterator from HF datasets.
+
+    Respects tokenizer_cfg.training_corpus:
+      vi_ratio, en_ratio, max_corpus_tokens
+    Distributes budget per source proportionally by weight.
+    Round-robin interleaves sources so VI and EN are mixed throughout.
+    """
+    train_cfg = tokenizer_cfg.get("training_corpus", {})
+    max_tokens: int = train_cfg.get("max_corpus_tokens", 5_000_000_000)
+    vi_ratio: float = train_cfg.get("vi_ratio", 0.60)
+    en_ratio: float = train_cfg.get("en_ratio", 0.40)
+    seed: int = curation_cfg.get("seed", 42)
+
+    vi_budget_chars = int(max_tokens * vi_ratio * _CHARS_PER_TOKEN["vi"])
+    en_budget_chars = int(max_tokens * en_ratio * _CHARS_PER_TOKEN["en"])
+
+    # Only active HF sources (skip null hf_dataset and disabled)
+    all_sources = [
+        s for s in curation_cfg.get("sources", [])
+        if s.get("hf_dataset") and s.get("enabled", True) is not False
+    ]
+    vi_sources = [s for s in all_sources if s.get("language") == "vi"]
+    en_sources = [s for s in all_sources if s.get("language") == "en"]
+
+    vi_w_total = sum(s.get("weight", 0) for s in vi_sources) or 1.0
+    en_w_total = sum(s.get("weight", 0) for s in en_sources) or 1.0
+
+    print(f"[tokenizer] corpus budget: {max_tokens/1e9:.1f}B tokens  "
+          f"VI={vi_ratio:.0%} ({vi_budget_chars/1e9:.1f}B chars)  "
+          f"EN={en_ratio:.0%} ({en_budget_chars/1e9:.1f}B chars)")
+    print(f"[tokenizer] VI sources: {len(vi_sources)}  EN sources: {len(en_sources)}")
+
+    # Build per-source iterators with individual char budgets
+    source_iters: list[Iterator[str]] = []
+    for src in vi_sources:
+        budget = int(vi_budget_chars * src.get("weight", 0) / vi_w_total)
+        if budget < 1_000_000:  # skip if <1M chars
+            continue
+        print(f"  vi  {src['id']:25s}  budget={budget/1e9:.2f}B chars")
+        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed))
+
+    for src in en_sources:
+        budget = int(en_budget_chars * src.get("weight", 0) / en_w_total)
+        if budget < 1_000_000:
+            continue
+        print(f"  en  {src['id']:25s}  budget={budget/1e9:.2f}B chars")
+        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed))
+
+    # Round-robin interleave: ensures VI+EN mixed throughout BPE training
+    active = [iter(it) for it in source_iters]
+    exhausted = [False] * len(active)
+    while not all(exhausted):
+        for i, it in enumerate(active):
+            if exhausted[i]:
+                continue
+            try:
+                yield next(it)
+            except StopIteration:
+                exhausted[i] = True
 
 
 # ─── Fertility measurement ────────────────────────────────────────────────────
@@ -124,18 +254,16 @@ _LATEX_SAMPLE = (
 )
 
 
-def measure_fertility(tokenizer, target: dict) -> dict[str, float]:
-    """tokens/word for VI, EN, and LaTeX samples."""
+def measure_fertility(tokenizer, targets: dict) -> dict[str, float]:
     results: dict[str, float] = {}
-    samples = {"vi": _VI_SAMPLE, "en": _EN_SAMPLE, "latex": _LATEX_SAMPLE}
-    for lang, text in samples.items():
+    for lang, text in [("vi", _VI_SAMPLE), ("en", _EN_SAMPLE), ("latex", _LATEX_SAMPLE)]:
         words = text.split()
         tokens = tokenizer.encode(text, add_special_tokens=False)
         fertility = len(tokens) / max(len(words), 1)
         results[lang] = round(fertility, 3)
-        max_allowed = target.get(f"{lang}_max", 999)
+        max_allowed = targets.get(f"{lang}_max", 999)
         status = "OK" if fertility <= max_allowed else f"WARN (>{max_allowed})"
-        print(f"  Fertility [{lang}]: {fertility:.3f} tok/word  {status}")
+        print(f"  fertility [{lang}]: {fertility:.3f} tok/word  {status}")
     return results
 
 
@@ -147,10 +275,21 @@ def main() -> None:
     )
     parser.add_argument("--config", default="configs/tokenizer_en_vi.yaml")
     parser.add_argument(
-        "--corpus_dirs",
-        nargs="+",
-        help="Directories containing .jsonl/.txt text files. "
-             "Overrides config if provided.",
+        "--curation_config", default="configs/curation_pipeline.yaml",
+        help="Curation pipeline config (used to read HF dataset sources).",
+    )
+    parser.add_argument(
+        "--corpus_dirs", nargs="+", default=None,
+        help="Legacy mode: directories with .jsonl/.txt files. "
+             "If set, skips HF dataset reading.",
+    )
+    parser.add_argument(
+        "--cache_dir", default=None,
+        help="HF datasets cache directory (same as used in download_datasets.py).",
+    )
+    parser.add_argument(
+        "--hf_token", default=os.environ.get("HF_TOKEN"),
+        help="HuggingFace token for gated datasets.",
     )
     parser.add_argument("--output_dir", help="Override config output_dir.")
     args = parser.parse_args()
@@ -164,7 +303,7 @@ def main() -> None:
     vocab_size: int = cfg["vocab_size"]
     fertility_targets: dict = cfg.get("fertility_targets", {})
 
-    # ── Build special token list ────────────────────────────────────────────
+    # ── Special tokens ──────────────────────────────────────────────────────
     special_tokens: list[str] = []
     st_cfg = cfg.get("special_tokens", {})
     for key in ("bos_token", "eos_token", "pad_token", "unk_token"):
@@ -179,67 +318,37 @@ def main() -> None:
         special_tokens.append(pat)
     # Deduplicate preserving order
     seen: set[str] = set()
-    unique_specials: list[str] = []
-    for t in special_tokens:
-        if t not in seen:
-            seen.add(t)
-            unique_specials.append(t)
-    special_tokens = unique_specials
+    special_tokens = [t for t in special_tokens if not (t in seen or seen.add(t))]
 
-    # ── Import tokenizers (HF tokenizers library) ───────────────────────────
+    # ── Import tokenizers ───────────────────────────────────────────────────
     try:
-        from tokenizers import (
-            Tokenizer,
-            decoders,
-            models,
-            normalizers,
-            pre_tokenizers,
-            trainers,
-        )
+        from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers, trainers
         from tokenizers.processors import TemplateProcessing
         from transformers import PreTrainedTokenizerFast
     except ImportError as exc:
-        raise RuntimeError(
-            "Missing deps: pip install tokenizers transformers"
-        ) from exc
+        raise RuntimeError("pip install tokenizers transformers") from exc
 
     print(f"[tokenizer] vocab_size={vocab_size}  special_tokens={len(special_tokens)}")
-    print(f"[tokenizer] special tokens: {special_tokens[:6]} ... {special_tokens[-2:]}")
 
-    # ── Build tokenizer object ───────────────────────────────────────────────
+    # ── Build tokenizer ─────────────────────────────────────────────────────
     tokenizer_obj = Tokenizer(models.BPE())
-
-    # NFC normalization: canonical composition, never strip diacritics
     tokenizer_obj.normalizer = normalizers.NFC()
-
-    # Byte-level pre-tokenizer with digit splitting
     tokenizer_obj.pre_tokenizer = pre_tokenizers.Sequence([
         pre_tokenizers.Digits(individual_digits=True),
         pre_tokenizers.ByteLevel(add_prefix_space=True),
     ])
-
-    # Byte-level decoder
     tokenizer_obj.decoder = decoders.ByteLevel()
 
-    # ── Build corpus ────────────────────────────────────────────────────────
+    # ── Build corpus iterator ───────────────────────────────────────────────
     if args.corpus_dirs:
-        corpus_dirs = [Path(d) for d in args.corpus_dirs]
-        print(f"[tokenizer] using corpus dirs: {corpus_dirs}")
-        iterator = corpus_iterator(corpus_dirs)
+        # Legacy mode: read from .jsonl/.txt directories
+        print(f"[tokenizer] legacy mode: reading from {args.corpus_dirs}")
+        iterator = corpus_iterator_from_dirs([Path(d) for d in args.corpus_dirs])
     else:
-        # Fallback: read from the materialized curated outputs
-        default_dirs = [
-            Path("outputs/curated/raw"),
-            Path("outputs/curated/filtered"),
-        ]
-        available = [d for d in default_dirs if d.exists()]
-        if not available:
-            raise RuntimeError(
-                "No corpus found. Pass --corpus_dirs or run the curation pipeline first "
-                "(scripts/curate/00_materialize.py ... 02_language_id.py)."
-            )
-        print(f"[tokenizer] reading from default dirs: {available}")
-        iterator = corpus_iterator(available)
+        # Primary mode: stream directly from HF datasets
+        with open(args.curation_config, "r", encoding="utf-8") as f:
+            curation_cfg = yaml.safe_load(f)
+        iterator = build_balanced_iterator(cfg, curation_cfg, args.cache_dir, args.hf_token)
 
     # ── Train ───────────────────────────────────────────────────────────────
     trainer = trainers.BpeTrainer(
@@ -250,11 +359,11 @@ def main() -> None:
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
     )
 
-    print(f"[tokenizer] training BPE (vocab={vocab_size}) ...")
+    print(f"[tokenizer] training BPE vocab_size={vocab_size} ...")
     tokenizer_obj.train_from_iterator(iterator, trainer=trainer)
     print(f"[tokenizer] trained vocab size: {tokenizer_obj.get_vocab_size()}")
 
-    # ── Post-process: add BOS/EOS template ─────────────────────────────────
+    # ── BOS/EOS post-processor ──────────────────────────────────────────────
     bos = st_cfg.get("bos_token", "<bos>")
     eos = st_cfg.get("eos_token", "<eos>")
     bos_id = tokenizer_obj.token_to_id(bos)
@@ -266,7 +375,7 @@ def main() -> None:
             special_tokens=[(bos, bos_id), (eos, eos_id)],
         )
 
-    # ── Save as HF fast tokenizer ────────────────────────────────────────────
+    # ── Save as HF fast tokenizer ───────────────────────────────────────────
     hf_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer_obj,
         bos_token=st_cfg.get("bos_token"),
@@ -276,26 +385,21 @@ def main() -> None:
         additional_special_tokens=[
             t for t in special_tokens
             if t not in (
-                st_cfg.get("bos_token"),
-                st_cfg.get("eos_token"),
-                st_cfg.get("pad_token"),
-                st_cfg.get("unk_token"),
+                st_cfg.get("bos_token"), st_cfg.get("eos_token"),
+                st_cfg.get("pad_token"), st_cfg.get("unk_token"),
             )
         ],
     )
     hf_tokenizer.save_pretrained(str(output_dir))
     print(f"[tokenizer] saved to {output_dir}")
 
-    # ── Write chat template ──────────────────────────────────────────────────
-    chat_template_path = output_dir / "chat_template.jinja"
-    chat_template_path.write_text(CHAT_TEMPLATE_JINJA, encoding="utf-8")
-    # Bake the chat template + Vietnamese system prompt into tokenizer_config.json
+    # ── Chat template ───────────────────────────────────────────────────────
+    (output_dir / "chat_template.jinja").write_text(CHAT_TEMPLATE_JINJA, encoding="utf-8")
     tc_path = output_dir / "tokenizer_config.json"
     if tc_path.exists():
         with tc_path.open("r", encoding="utf-8") as f:
             tc = json.load(f)
         tc["chat_template"] = CHAT_TEMPLATE_JINJA
-        # Default system prompt in Vietnamese (model is Vietnamese-first)
         tc["default_system_prompt"] = cfg.get(
             "default_system_prompt",
             "Bạn là một trợ lý AI thông minh, thành thạo tiếng Việt và tiếng Anh.\n"
@@ -305,24 +409,20 @@ def main() -> None:
         with tc_path.open("w", encoding="utf-8") as f:
             json.dump(tc, f, ensure_ascii=False, indent=2)
 
-    # ── Fertility report ─────────────────────────────────────────────────────
+    # ── Fertility + round-trip validation ───────────────────────────────────
     print("[tokenizer] measuring fertility ...")
-    # Reload to ensure round-trip is correct
     hf_tok_loaded = PreTrainedTokenizerFast.from_pretrained(str(output_dir))
     fertility = measure_fertility(hf_tok_loaded, fertility_targets)
 
-    # Round-trip validation
-    for sample_name, sample_text in [
-        ("VI", _VI_SAMPLE), ("EN", _EN_SAMPLE), ("LaTeX", _LATEX_SAMPLE)
-    ]:
-        ids = hf_tok_loaded.encode(sample_text, add_special_tokens=False)
+    for name, text in [("VI", _VI_SAMPLE), ("EN", _EN_SAMPLE), ("LaTeX", _LATEX_SAMPLE)]:
+        ids = hf_tok_loaded.encode(text, add_special_tokens=False)
         decoded = hf_tok_loaded.decode(ids)
-        assert decoded == sample_text, (
-            f"Round-trip FAILED for {sample_name}!\n  in:  {repr(sample_text)}\n  out: {repr(decoded)}"
+        assert decoded == text, (
+            f"Round-trip FAILED for {name}!\n  in:  {repr(text)}\n  out: {repr(decoded)}"
         )
     print("[tokenizer] round-trip validation: OK")
 
-    # Save tokenizer card
+    # ── Tokenizer card ──────────────────────────────────────────────────────
     card = {
         "vocab_size": hf_tok_loaded.vocab_size,
         "special_tokens_count": len(hf_tok_loaded.all_special_tokens),
@@ -330,11 +430,10 @@ def main() -> None:
         "fertility_targets": fertility_targets,
         "config": str(args.config),
     }
-    card_path = output_dir / "tokenizer_card.json"
-    with card_path.open("w", encoding="utf-8") as f:
+    with (output_dir / "tokenizer_card.json").open("w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
-    print(f"[ok] tokenizer card: {card_path}")
-    print(f"[ok] done. vocab_size={hf_tok_loaded.vocab_size}")
+
+    print(f"[ok] tokenizer ready at {output_dir}  vocab={hf_tok_loaded.vocab_size}")
 
 
 if __name__ == "__main__":
