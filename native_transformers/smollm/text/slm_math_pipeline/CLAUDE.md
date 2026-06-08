@@ -160,9 +160,18 @@ python scripts/init_model_from_scratch.py --config configs/model_llama_1b_en_vi.
 bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml \
   --gpu_ids 4,5,6,7
 
-# REQUIRED: download long-context + mid-train data before the stages below
-python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache
-python scripts/download_longctx_datasets.py --dry_run   # preview sizes first
+# Pack long-context shards from base pretrain cache — no new downloads needed.
+# Multi-doc packing: concatenate docs with EOS to fill target seq_len.
+# Run once per seq_len BEFORE the corresponding context-extension stage.
+python scripts/pack_longctx_shards.py --seq_len 16384  --dry_run  # preview
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 16384  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_16k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 32768  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_32k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 65536  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_64k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 131072 --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_128k
 
 # Context extension — must run in order (skipping stages is unstable)
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml  --gpu_ids 4,5,6,7
@@ -170,7 +179,9 @@ bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml  -
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml  --gpu_ids 4,5,6,7
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml --gpu_ids 4,5,6,7
 
-# Mid-training (optional math/VI strengthening) — also needs download_longctx_datasets.py
+# Mid-training (optional math/VI strengthening) — pack 8192-len shards first
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 8192 --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_midtrain
 bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml --gpu_ids 4,5,6,7
 ```
 

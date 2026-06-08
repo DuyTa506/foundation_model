@@ -214,9 +214,18 @@ bash scripts/launch_pretrain_hf.sh \
   --config configs/training_8xH200_hf_pretrain.yaml \
   --gpu_ids 4,5,6,7
 
-# Download long-context + mid-train data BEFORE the next stages
-python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache --dry_run  # preview
-HF_TOKEN=hf_xxx python scripts/download_longctx_datasets.py --cache_dir /data/hf_cache
+# Pack long-context shards from already-downloaded base pretrain data (no new downloads needed).
+# Multi-doc packing: concatenate docs with EOS until target seq_len is filled.
+# Run once per seq_len before each context-extension stage.
+python scripts/pack_longctx_shards.py --seq_len 16384 --dry_run   # preview plan
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 16384  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_16k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 32768  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_32k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 65536  --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_64k
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 131072 --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_128k
 
 # Context extension — run IN ORDER, never skip stages
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_16k.yaml  --gpu_ids 4,5,6,7
@@ -238,9 +247,9 @@ constant at any GPU count. If switching to 8 GPUs, halve each config's `gradient
 ### Stage 3 — Mid-training (optional)
 
 ```bash
-# download_longctx_datasets.py covers mid-train data too (stages: midtrain)
-HF_TOKEN=hf_xxx python scripts/download_longctx_datasets.py \
-  --stages midtrain --cache_dir /data/hf_cache
+# Pack mid-train shards from base pretrain cache (same data, seq_len 8192)
+python scripts/pack_longctx_shards.py --tokenizer_path outputs/tokenizer \
+  --seq_len 8192 --cache_dir /data/hf_cache --output_dir outputs/curated/tokenized_midtrain
 
 bash scripts/launch_pretrain_hf.sh --config configs/training_midtrain.yaml --gpu_ids 4,5,6,7
 ```
