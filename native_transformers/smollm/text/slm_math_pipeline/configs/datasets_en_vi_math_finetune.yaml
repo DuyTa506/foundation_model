@@ -1,11 +1,11 @@
+# SFT dataset config — Vietnamese-first, hybrid thinking/non-thinking
+# mode field on each source: "think" | "no_think" | "mixed"
 version: 1
 seed: 42
 
 curation:
   languages:
-    allow:
-      - en
-      - vi
+    allow: [en, vi]
   dedup:
     enabled: true
     method: exact_and_minhash
@@ -15,72 +15,125 @@ curation:
     enabled: true
     max_seq_length: 4096
   reasoning_tags:
-    strip_think_tags: true
+    # Per-sample mode (not global strip).
+    # "think" samples: KEEP <think>...</think>
+    # "no_think" samples: STRIP <think>...</think>
+    mode_field: mode
+    default_mode: no_think   # safe default for sources without mode label
 
 sources:
-  - id: mathinstruct
-    hf_dataset: agicorp/MathInstruct
-    split: train
-    prompt_field: instruction
-    response_field: output
-    language: en
-    weight: 0.40
-  - id: metamathqa
-    hf_dataset: meta-math/MetaMathQA
-    split: train
-    prompt_field: query
+
+  # ── Vietnamese thinking (CoT traces, mode=think) ─────────────────────────
+  - id: vi_reasoning_translated
+    hf_dataset: null             # outputs/vi_reasoning/thinking_sft_translated.jsonl
+    manifest_path: outputs/vi_reasoning/thinking_sft_translated.jsonl
+    prompt_field: prompt
     response_field: response
-    language: en
-    weight: 0.35
-  - id: dart_math
-    hf_dataset: hkust-nlp/dart-math-pool-math
-    split: train
-    prompt_field: question
-    response_field: answer
-    language: en
+    language: vi
     weight: 0.15
-  - id: scienceqa
-    hf_dataset: derek-thomas/ScienceQA
+    mode: think
+
+  - id: vi_reasoning_distilled
+    hf_dataset: null             # outputs/vi_reasoning/thinking_sft_distilled.jsonl
+    manifest_path: outputs/vi_reasoning/thinking_sft_distilled.jsonl
+    prompt_field: prompt
+    response_field: response
+    language: vi
+    weight: 0.15
+    mode: think
+
+  - id: viet_qvq_r1
+    hf_dataset: 5CD-AI/Viet-qvq-r1
     split: train
-    prompt_field: question
-    response_field: lecture
-    language: en
-    weight: 0.05
-  - id: sciq
-    hf_dataset: allenai/sciq
-    split: train
-    prompt_field: question
-    response_field: support
-    language: en
-    weight: 0.05
+    prompt_field: prompt
+    response_field: response
+    language: vi
+    weight: 0.08
+    mode: think
+
+  # ── Vietnamese non-thinking (concise answers) ────────────────────────────
   - id: vi_metamath_395k
     hf_dataset: 5CD-AI/Vietnamese-395k-meta-math-MetaMathQA-gg-translated
     split: train
     prompt_field: query
     response_field: response
     language: vi
-    weight: 0.10
-  - id: vi_orca_math_200k
+    weight: 0.12
+    mode: no_think
+
+  - id: vi_orca_math
     hf_dataset: 5CD-AI/Vietnamese-microsoft-orca-math-word-problems-200k-gg-translated
     split: train
     prompt_field: instruction
     response_field: output
     language: vi
-    weight: 0.07
-  - id: vi_openmathinstruct_50k
+    weight: 0.08
+    mode: no_think
+
+  - id: vi_openmathinstruct
     hf_dataset: 5CD-AI/Vietnamese-nvidia-OpenMathInstruct-1-50k-gg-translated
     split: train
     prompt_field: instruction
     response_field: output
     language: vi
-    weight: 0.06
-  - id: vi_metamath_40k
-    hf_dataset: 5CD-AI/Vietnamese-meta-math-MetaMathQA-40K-gg-translated
+    weight: 0.05
+    mode: no_think
+
+  # ── English thinking (CoT traces) ────────────────────────────────────────
+  - id: openr1_math
+    hf_dataset: open-r1/OpenR1-Math-220k
+    split: train
+    prompt_field: problem
+    response_field: solution
+    language: en
+    weight: 0.12
+    mode: think
+
+  - id: numina_cot
+    hf_dataset: AI-MO/NuminaMath-CoT
+    split: train
+    prompt_field: problem
+    response_field: solution
+    language: en
+    weight: 0.08
+    mode: think
+
+  # ── English non-thinking (concise math) ─────────────────────────────────
+  - id: metamathqa
+    hf_dataset: meta-math/MetaMathQA
     split: train
     prompt_field: query
     response_field: response
-    language: vi
+    language: en
+    weight: 0.08
+    mode: no_think
+
+  - id: dart_math
+    hf_dataset: hkust-nlp/dart-math-pool-math
+    split: train
+    prompt_field: question
+    response_field: answer
+    language: en
+    weight: 0.05
+    mode: no_think
+
+  - id: scienceqa
+    hf_dataset: derek-thomas/ScienceQA
+    split: train
+    prompt_field: question
+    response_field: lecture
+    language: en
     weight: 0.02
+    mode: no_think
+
+  - id: sciq
+    hf_dataset: allenai/sciq
+    split: train
+    prompt_field: question
+    response_field: support
+    language: en
+    weight: 0.02
+    mode: no_think
 
 output:
   manifest_name: finetune_manifest.jsonl

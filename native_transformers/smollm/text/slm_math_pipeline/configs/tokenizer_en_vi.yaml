@@ -1,0 +1,63 @@
+# Tokenizer training config: from-scratch byte-level BPE, Vietnamese-first EN+VI
+# Library: HuggingFace `tokenizers` (ByteLevelBPETokenizer)
+# Produces outputs/tokenizer/ containing tokenizer.json, tokenizer_config.json,
+# special_tokens_map.json, chat_template.jinja, tokenizer_card.json.
+#
+# Chat template and all special instructions are in Vietnamese (the primary
+# language of this model). English users are handled by the same template.
+
+vocab_size: 64000             # includes all special tokens
+
+# Tokenizer type
+type: byte_level_bpe          # zero <unk>; full Unicode coverage inc. VI diacritics
+
+# Text normalization: NFC only (canonical composition).
+# NEVER NFKC — that strips combining diacritics critical to Vietnamese.
+normalizer: NFC
+
+# Pre-tokenizer: byte-level split + digit splitting for math
+pre_tokenizer:
+  type: byte_level
+  add_prefix_space: true
+  individual_digits: true      # 123 -> 1 2 3; known to help arithmetic
+
+# Training corpus balance (VI-prioritized to minimize VI fertility)
+training_corpus:
+  vi_ratio: 0.60               # oversample VI so VI subwords get richer merges
+  en_ratio: 0.40
+  math_slice_ratio: 0.10       # inject LaTeX/math text for operator/symbol merges
+  max_corpus_tokens: 30_000_000_000
+
+# Special tokens (added as atomic tokens, not split by BPE)
+special_tokens:
+  bos_token: "<bos>"
+  eos_token: "<eos>"
+  pad_token: "<pad>"           # distinct from EOS — clean loss masking
+  unk_token: null              # byte-level BPE never emits <unk>
+  # ChatML delimiters — standard, recognized by vLLM/TRL
+  chat_tokens:
+    - "<|im_start|>"
+    - "<|im_end|>"
+  # Reasoning tokens: atomic so they're never shattered by BPE merges
+  reasoning_tokens:
+    - "<think>"
+    - "</think>"
+  reserved:
+    count: 64
+    pattern: "<|reserved_{i}|>"
+
+# Default system prompt (Vietnamese — this is a Vietnamese-first model)
+# Baked into tokenizer_config.json so SFT/inference loads it automatically.
+default_system_prompt: |
+  Bạn là một trợ lý AI thông minh, thành thạo tiếng Việt và tiếng Anh.
+  Hãy trả lời bằng ngôn ngữ của người dùng.
+  Với các câu hỏi toán học hoặc khoa học, hãy trình bày từng bước rõ ràng.
+
+# Fertility targets (tokens/word; validated in tokenizer_card.json)
+fertility_targets:
+  vi_max: 1.6   # above this = VI is over-fragmented; re-tune vi_ratio
+  en_max: 1.4
+  latex_max: 2.5
+
+# Output location
+output_dir: outputs/tokenizer

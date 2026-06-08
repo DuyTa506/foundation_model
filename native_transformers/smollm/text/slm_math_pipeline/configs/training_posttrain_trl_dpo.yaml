@@ -1,12 +1,17 @@
+# DPO post-training config — optional style/safety alignment pass after GRPO.
+# Points at the from-scratch model + new tokenizer (NOT openbmb/MiniCPM5-1B).
+# Run AFTER GRPO: model_id = outputs/rl.
+version: 1
+
 run:
-  name: minicpm5_1b_en_vi_math_posttrain
+  name: llama_1b_en_vi_dpo_style
   output_dir: outputs/posttrain
   seed: 42
 
 model:
-  model_id: outputs/finetune
-  tokenizer_id: openbmb/MiniCPM5-1B
-  trust_remote_code: true
+  model_id: outputs/rl          # from GRPO checkpoint (or outputs/finetune for DPO-only)
+  tokenizer_id: outputs/tokenizer
+  trust_remote_code: false
 
 mode:
   preferred: dpo
@@ -16,22 +21,22 @@ dpo:
   beta: 0.1
   max_length: 4096
   max_prompt_length: 2048
-  learning_rate: 1.0e-5
+  learning_rate: 5.0e-6
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 32
-  max_steps: 10000
-  warmup_steps: 200
+  max_steps: 5000
+  warmup_steps: 100
   logging_steps: 10
   save_steps: 500
   bf16: true
 
 sft_fallback:
   max_seq_length: 4096
-  learning_rate: 5.0e-5
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 32
-  max_steps: 10000
-  warmup_steps: 200
+  learning_rate: 1.0e-5
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 16
+  max_steps: 5000
+  warmup_steps: 100
   logging_steps: 10
   save_steps: 500
   bf16: true
@@ -39,4 +44,6 @@ sft_fallback:
 data:
   preference_manifest_path: outputs/posttrain_manifest/posttrain_preference_manifest.jsonl
   sft_manifest_path: outputs/posttrain_manifest/posttrain_sft_manifest.jsonl
-  strip_think_tags: true
+  # Per-sample mode: DPO pairs keep their think/no_think mode field
+  # strip_think_tags is REMOVED — behavior controlled by mode field
+  strip_think_tags: false

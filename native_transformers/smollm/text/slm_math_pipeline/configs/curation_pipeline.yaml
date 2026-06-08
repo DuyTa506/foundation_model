@@ -1,0 +1,215 @@
+# Data curation pipeline config (datatrove-based, MiniCPM UltraClean-style)
+# Consumed by scripts/curate/00_materialize.py through 07_tokenize_pack.py.
+# Replace the broken filter_language_en_vi.py / dedup_min_hash.py /
+# prepare_megatron_indexed_dataset.py trio.
+version: 1
+seed: 42
+
+# ── Language ID ──────────────────────────────────────────────────────────────
+language_id:
+  backend: glotlid             # or: fasttext (lid.176.bin)
+  model: GlotLID-M             # GlotLID multilingual; use fastText as fallback
+  keep_languages: [eng_Latn, vie_Latn]
+  min_confidence: 0.65         # drop ambiguous docs below threshold
+
+# ── Heuristic quality filter (Gopher + C4 + FineWeb style) ───────────────────
+quality_filter:
+  min_chars: 300
+  max_chars: 500_000
+  min_words: 50
+  max_word_length: 1000        # drop docs with extreme token lengths
+  # Gopher rules
+  mean_word_length: [3, 10]
+  symbol_word_ratio_max: 0.10  # fraction of tokens that are symbols
+  bullet_line_ratio_max: 0.90
+  ellipsis_line_ratio_max: 0.30
+  alpha_ratio_min: 0.65        # at least 65% of chars must be alphabetic
+  # Vietnamese-specific
+  vi_diacritic_min_ratio: 0.002  # VI docs must have some diacritics (catch garbled VI)
+  # FineWeb/C4 rules
+  end_with_punctuation: true
+  repeated_line_fraction_max: 0.30
+
+# ── UltraClean quality classifier ────────────────────────────────────────────
+ultraclean:
+  enabled: true
+  en:
+    classifier_hf_id: openbmb/Ultra-FineWeb-classifier   # released by OpenBMB
+    threshold: 0.5
+  vi:
+    # VI classifier trained on HQ VI seeds using the UltraClean efficient-
+    # verification recipe (see curate/03_ultraclean_filter.py for training).
+    # Until a VI classifier is trained, falls back to heuristics only.
+    classifier_path: outputs/ultraclean_vi/vi_classifier.bin
+    threshold: 0.5
+    fallback_to_heuristics: true
+
+# ── Near-deduplication (MinHash LSH via datatrove) ──────────────────────────
+dedup:
+  enabled: true
+  exact_first: true            # SHA-256 exact-dedup pass before MinHash
+  minhash:
+    ngram_size: 5              # 5-gram at token level (datatrove default)
+    num_hashes: 128
+    jaccard_threshold: 0.80
+    bands: 8
+    rows_per_band: 16          # 8*16 = 128 total hashes
+
+# ── Decontamination ──────────────────────────────────────────────────────────
+decontamination:
+  enabled: true
+  ngram_size: 13
+  benchmark_sets:
+    - openai/gsm8k
+    - hendrycks/competition_math
+    - cais/mmlu
+    - allenai/ai2_arc
+    - allenai/sciq
+    - harness:lighteval/MMLU_vi        # VI benchmarks
+    - ZaloAI/ViMMLU
+  contamination_threshold: 1           # drop if ANY 13-gram overlaps
+
+# ── PII redaction ─────────────────────────────────────────────────────────────
+pii:
+  enabled: true
+  redact_email: true
+  redact_ip: true
+  redact_phone: true
+  replacement: "<|pii|>"
+
+# ── Data sources (VI-first mix; token-share targets) ─────────────────────────
+# VI≈60% / EN≈40%; EN math+science (~24%) kept as STEM backbone.
+sources:
+
+  # ── Vietnamese (60% total) ──────────────────────────────────────────────
+  - id: fineweb2_hq_vi
+    hf_dataset: epfml/FineWeb2-HQ
+    subset: vie_Latn
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.38
+    role: vi_hq_web
+    note: "Highest-quality VI web; basis for Ultra-FineWeb-VI classifier seeds"
+
+  - id: culturax_vi
+    hf_dataset: uonlp/CulturaX
+    subset: vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.12
+    role: vi_hq_web
+
+  - id: vi_curated
+    hf_dataset: VTSNLP/vietnamese_curated_dataset
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.07
+    role: vi_curated
+
+  - id: wikipedia_vi
+    hf_dataset: wikimedia/wikipedia
+    subset: 20231101.vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.05
+    role: vi_curated
+
+  # VI math/science (verified-translated + synth; populated by Stage 4/5)
+  - id: vi_math_synth
+    hf_dataset: null            # populated by scripts/data/synth_vi_reasoning.py
+    language: vi
+    weight: 0.08
+    role: vi_math_synth
+    enabled: false              # enable after synth pipeline runs
+
+  # ── English (40% total — math+science backbone) ─────────────────────────
+  - id: finemath_4plus
+    hf_dataset: HuggingFaceTB/finemath
+    subset: finemath-4plus
+    split: train
+    text_field: text
+    language: en
+    weight: 0.10
+    role: en_math
+
+  - id: finemath_3plus
+    hf_dataset: HuggingFaceTB/finemath
+    subset: finemath-3plus
+    split: train
+    text_field: text
+    language: en
+    weight: 0.06
+    role: en_math
+
+  - id: open_web_math
+    hf_dataset: open-web-math/open-web-math
+    split: train
+    text_field: text
+    language: en
+    weight: 0.06
+    role: en_math
+
+  - id: ultradata_math
+    hf_dataset: openbmb/UltraData-Math
+    subset: UltraData-Math-L2-preview
+    split: train
+    text_field: text
+    language: en
+    weight: 0.04
+    role: en_math
+
+  - id: ultra_fineweb_en
+    hf_dataset: openbmb/Ultra-FineWeb
+    split: train
+    text_field: text
+    language: en
+    weight: 0.08
+    role: en_hq_web
+
+  - id: fineweb_edu
+    hf_dataset: HuggingFaceFW/fineweb-edu
+    subset: sample-10BT
+    split: train
+    text_field: text
+    language: en
+    weight: 0.04
+    role: en_edu
+
+  - id: pes2o
+    hf_dataset: allenai/peS2o
+    split: train
+    text_field: text
+    language: en
+    weight: 0.02
+    role: en_science
+
+# ── Tokenization + packing (Stage 7) ─────────────────────────────────────────
+tokenize:
+  tokenizer_path: outputs/tokenizer
+  packing: true                # concatenate docs with EOS, chunk to max_seq_length
+  max_seq_length: 4096         # base training; overridden per longctx config
+  shuffle: true
+  max_tokens_per_file: 1_000_000_000   # 1B tokens per shard file
+  output_dir: outputs/curated/tokenized
+
+# ── WSD decay-phase high-quality mix (override in pretrain config) ────────────
+# Used during the last ~10–20% of pretraining tokens (exponential decay).
+# VI-dominant (~70–80% VI), instruction-formatted.
+decay_phase_mix:
+  vi_ratio: 0.75
+  en_ratio: 0.25
+  instruction_format: chatml   # use the chat template (ChatML)
+  sources:
+    - fineweb2_hq_vi           # best VI web
+    - vi_curated
+    - wikipedia_vi
+    - finemath_4plus           # best EN math
+
+output:
+  manifest_name: dataset_manifest.jsonl
+  data_card_name: data_card.json
+  base_dir: outputs/curated

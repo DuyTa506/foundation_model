@@ -1,0 +1,72 @@
+# Mid-training config (MiniCPM Stage 2): strengthen math/science/VI after base pretrain.
+# Optional but recommended before SFT.  Start from outputs/pretrain_128k (or 32k).
+version: 1
+
+run:
+  name: llama_1b_en_vi_midtrain
+  output_dir: outputs/midtrain
+  seed: 42
+  resume_from_checkpoint: outputs/pretrain_128k   # or pretrain_32k
+
+hardware:
+  gpus_per_node: 8
+  gpu_type: H200
+  precision: bf16
+
+model:
+  config_path: configs/model_llama_1b_en_vi.yaml
+  init_checkpoint: outputs/pretrain_128k
+
+data:
+  tokenized_shards_dir: outputs/curated/tokenized_midtrain
+  max_seq_length: 8192         # mid-length; builds up math/science with more context
+  packing: true
+
+# Mid-train data: math+science heavy, VI-first
+midtrain_mix:
+  vi_ratio: 0.55               # slightly less VI-heavy than base; more math
+  en_ratio: 0.45
+  sources:
+    - finemath_4plus           # best EN math
+    - finemath_3plus
+    - open_web_math
+    - ultradata_math
+    - fineweb2_hq_vi           # best VI web
+    - vi_curated
+    - wikipedia_vi
+    - pes2o                    # science
+    - vi_math_synth            # if available
+
+optimization:
+  peak_learning_rate: 1.0e-4   # lower than base; mid-training fine-tune
+  min_learning_rate: 1.0e-5
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+scheduler:
+  type: warmup_stable_decay
+  warmup_steps: 500
+  stable_steps: 4000
+  decay_steps: 500
+  decay_phase_data_mix: true
+
+training:
+  micro_batch_size: 4
+  gradient_accumulation_steps: 16
+  total_steps: 5000            # ~10B tokens
+  logging_steps: 10
+  save_steps: 500
+  bf16: true
+  gradient_checkpointing: false
+
+parallelism:
+  strategy: fsdp
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    mixed_precision: bf16
+    activation_checkpointing: false
+
+checkpointing:
+  save_total_limit: 3

@@ -1,0 +1,77 @@
+# Long-context extension Phase 4: 64k -> 128k via YaRN
+# Run AFTER 64k extension is validated (outputs/pretrain_64k).
+# factor = 131072 / 4096 = 32x: requires YaRN (NTK-by-parts + mscale).
+version: 1
+
+run:
+  name: llama_1b_en_vi_longctx_128k
+  output_dir: outputs/pretrain_128k
+  seed: 42
+  resume_from_checkpoint: outputs/pretrain_64k
+
+hardware:
+  gpus_per_node: 8
+  gpu_type: H200
+  precision: bf16
+
+model:
+  config_path: configs/model_llama_1b_en_vi.yaml
+  init_checkpoint: outputs/pretrain_64k
+  # YaRN RoPE scaling: NTK-by-parts + attention temperature mscale.
+  # factor = max_position_embeddings / original_max_position_embeddings = 131072/4096
+  # The final shipped model config.json carries this rope_scaling block.
+  rope_scaling:
+    rope_type: yarn
+    factor: 32.0                        # 131072 / 4096
+    original_max_position_embeddings: 4096
+    attention_factor: null              # null = use YaRN default mscale formula
+    beta_fast: 32
+    beta_slow: 1
+
+data:
+  tokenized_shards_dir: outputs/curated/tokenized_128k
+  max_seq_length: 131072
+  packing: false   # at 128k, pack=false (single long docs per sample)
+
+optimization:
+  peak_learning_rate: 1.0e-5   # very small; only training positional patterns
+  min_learning_rate: 1.0e-6
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+scheduler:
+  type: warmup_stable_decay
+  warmup_steps: 50
+  stable_steps: 200
+  decay_steps: 250             # total ~500 steps; ~few B tokens
+
+training:
+  micro_batch_size: 1          # 128k context is extremely memory-intensive
+  gradient_accumulation_steps: 128
+  total_steps: 500             # 128K * 1 * 128 * 8 GPUs ≈ 524M tokens/step? No.
+  # global_batch_tokens = 1 * 128 * 8 * 131072 = ~134M tokens/step at micro_bs=1
+  # 500 steps ≈ 67B tokens; scale down if memory allows larger micro_batch
+  logging_steps: 10
+  save_steps: 100
+  bf16: true
+  gradient_checkpointing: true  # mandatory at 128k
+
+parallelism:
+  strategy: fsdp
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    mixed_precision: bf16
+    activation_checkpointing: true
+    cpu_offload: false          # flip to true if OOM despite checkpoint
+
+checkpointing:
+  save_total_limit: 3
+
+eval:
+  after_training: true
+  tasks:
+    - ruler_128k
+    - needle_128k
+    - longbench

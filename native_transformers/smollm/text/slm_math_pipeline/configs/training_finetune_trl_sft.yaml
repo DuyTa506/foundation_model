@@ -1,31 +1,40 @@
+# SFT finetuning config — from-scratch EN+VI model, hybrid thinking/non-thinking
+# Points at the from-scratch pretrained model (NOT openbmb/MiniCPM5-1B).
+version: 1
+
 run:
-  name: minicpm5_1b_en_vi_math_sft
+  name: llama_1b_en_vi_sft
   output_dir: outputs/finetune
   seed: 42
 
 model:
-  model_id: openbmb/MiniCPM5-1B
-  tokenizer_id: openbmb/MiniCPM5-1B
-  trust_remote_code: true
-  use_bnb_4bit: false
+  model_id: outputs/midtrain          # or outputs/pretrain_128k if midtrain skipped
+  tokenizer_id: outputs/tokenizer     # new from-scratch tokenizer
+  trust_remote_code: false            # plain LlamaForCausalLM, no custom code
 
 lora:
-  enabled: true
-  r: 16
-  alpha: 32
+  enabled: false   # full fine-tune for from-scratch model (LoRA optional)
+  r: 32
+  alpha: 64
   dropout: 0.05
   target_modules:
     - q_proj
+    - k_proj
     - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
 
 training:
-  max_seq_length: 4096
-  max_steps: 30000
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 32
-  learning_rate: 2.0e-4
+  max_seq_length: 4096          # base; add a long-context slice at 16k-32k
+  num_epochs: 2
+  max_steps: -1                 # -1 = use num_epochs; set positive to override
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 16
+  learning_rate: 1.5e-5         # 10-20x lower than pretrain
   lr_scheduler_type: cosine
-  warmup_steps: 500
+  warmup_steps: 200
   weight_decay: 0.01
   logging_steps: 10
   save_steps: 500
@@ -36,4 +45,17 @@ data:
   manifest_path: outputs/finetune_manifest/finetune_manifest.jsonl
   prompt_field: prompt
   response_field: response
-  strip_think_tags: true
+  default_mode: mixed           # "think" | "no_think" | "mixed" (use row's mode field)
+  # ── Vietnamese-first system prompt ───────────────────────────────────────────
+  # Written in Vietnamese because this is a Vietnamese-oriented model.
+  # The model sees this during every training sample; it conditions what language
+  # and style the model learns to respond in.
+  system_prompt: >
+    Bạn là một trợ lý AI thông minh, thành thạo tiếng Việt và tiếng Anh.
+    Hãy trả lời bằng ngôn ngữ của người dùng.
+    Với các câu hỏi toán học hoặc khoa học, hãy trình bày từng bước rõ ràng.
+
+  # ── Long-context slice ────────────────────────────────────────────────────
+  # Include some 16k-32k samples so long-context capability survives SFT.
+  # Configured separately; set max_seq_length: 16384 for this subset run.
+  long_context_manifest: null   # set to a path once long-doc SFT data is ready

@@ -1,0 +1,93 @@
+# Long-context extension Phase 3: 32k -> 64k via YaRN
+# Run AFTER 32k extension is validated (outputs/pretrain_32k).
+# factor = 64k / 4k = 16x: use YaRN (NTK-by-parts + mscale).
+version: 1
+
+run:
+  name: llama_1b_en_vi_longctx_64k
+  output_dir: outputs/pretrain_64k
+  seed: 42
+  resume_from_checkpoint: outputs/pretrain_32k
+
+hardware:
+  gpus_per_node: 8
+  gpu_type: H200
+  precision: bf16
+
+model:
+  config_path: configs/model_llama_1b_en_vi.yaml
+  init_checkpoint: outputs/pretrain_32k
+  rope_scaling:
+    rope_type: yarn
+    factor: 16.0                         # 65536 / 4096
+    original_max_position_embeddings: 4096
+    attention_factor: null               # null = YaRN default mscale formula
+    beta_fast: 32
+    beta_slow: 1
+
+data:
+  tokenized_shards_dir: outputs/curated/tokenized_64k
+  max_seq_length: 65536
+  packing: true   # still feasible to pack at 64k
+
+long_context_data:
+  sources:
+    - id: vi_books
+      hf_dataset: null
+      language: vi
+      weight: 0.30
+    - id: vi_wikipedia_long
+      hf_dataset: wikimedia/wikipedia
+      subset: 20231101.vi
+      language: vi
+      weight: 0.20
+    - id: pes2o
+      hf_dataset: allenai/peS2o
+      language: en
+      weight: 0.25
+    - id: en_books
+      hf_dataset: pg19
+      language: en
+      weight: 0.15
+    - id: synth_longctx
+      hf_dataset: null
+      weight: 0.10
+
+optimization:
+  peak_learning_rate: 2.0e-5   # between 32k (3e-5) and 128k (1e-5)
+  min_learning_rate: 2.0e-6
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+scheduler:
+  type: warmup_stable_decay
+  warmup_steps: 50
+  stable_steps: 350
+  decay_steps: 350
+
+training:
+  micro_batch_size: 1
+  gradient_accumulation_steps: 96
+  total_steps: 750
+  logging_steps: 10
+  save_steps: 150
+  bf16: true
+  gradient_checkpointing: true
+
+parallelism:
+  strategy: fsdp
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    mixed_precision: bf16
+    activation_checkpointing: true
+
+checkpointing:
+  save_total_limit: 3
+
+eval:
+  after_training: true
+  tasks:
+    - needle_64k
+    - ruler_64k

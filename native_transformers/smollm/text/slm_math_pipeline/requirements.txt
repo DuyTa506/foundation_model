@@ -7,21 +7,35 @@ accelerate==1.7.0
 datasets==3.6.0
 trl>=0.15
 peft
-deepspeed
 
-# Data processing and utilities
+# Data curation (datatrove replaces the broken filter/dedup/prepare scripts)
+datatrove[processing]          # streaming, sharded, restartable curation pipeline
+fasttext                       # language ID + UltraClean quality classifier
+huggingface_hub                # download GlotLID / Ultra-FineWeb-classifier
 pyarrow==20.0.0
+
+# Tokenizer training (from scratch)
+tokenizers                     # byte-level BPE; exports HF-compatible tokenizer.json
+
+# Math reward verification (GRPO)
+sympy                          # symbolic math equivalence for correctness reward
+
+# Other utilities
 numpy==1.26.4
 scipy==1.15.3
 scikit-learn==1.7.0
 sentencepiece==0.2.0
 safetensors==0.5.3
-langdetect==1.0.9
 pyyaml
 tqdm
 wandb
 bitsandbytes
+deepspeed
 
 # Evaluation
 lighteval[extended_tasks,multilingual] @ git+https://github.com/huggingface/lighteval.git@2788496c3ef9973a24c7d8b87ee5b2cceb430872
 vllm==0.9.1
+
+# Removed: langdetect (replaced by fasttext + GlotLID in curate/02_language_id.py)
+# Retained for compatibility: the old scripts still import it as a fallback.
+langdetect==1.0.9

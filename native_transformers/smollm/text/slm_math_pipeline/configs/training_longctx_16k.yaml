@@ -1,0 +1,88 @@
+# Long-context extension Phase 1: 4k -> 16k via ABF
+# Run AFTER base pretrain is complete (outputs/pretrain).
+# rope_theta=5e6 handles 4x extension without any rope_scaling.
+version: 1
+
+run:
+  name: llama_1b_en_vi_longctx_16k
+  output_dir: outputs/pretrain_16k
+  seed: 42
+  resume_from_checkpoint: outputs/pretrain
+
+hardware:
+  gpus_per_node: 8
+  gpu_type: H200
+  precision: bf16
+
+model:
+  config_path: configs/model_llama_1b_en_vi.yaml
+  init_checkpoint: outputs/pretrain
+  # rope_theta=5e6 already covers 4x extension (4k->16k) with no interpolation.
+  rope_scaling: null
+
+data:
+  tokenized_shards_dir: outputs/curated/tokenized_16k
+  max_seq_length: 16384
+  packing: true
+
+long_context_data:
+  sources:
+    - id: vi_books
+      hf_dataset: null
+      language: vi
+      weight: 0.30
+    - id: vi_wikipedia_long
+      hf_dataset: wikimedia/wikipedia
+      subset: 20231101.vi
+      language: vi
+      weight: 0.20
+    - id: pes2o
+      hf_dataset: allenai/peS2o
+      language: en
+      weight: 0.25
+    - id: en_books
+      hf_dataset: pg19
+      language: en
+      weight: 0.15
+    - id: synth_longctx
+      hf_dataset: null
+      weight: 0.10
+
+optimization:
+  peak_learning_rate: 5.0e-5   # slightly higher than 32k; smaller extension factor
+  min_learning_rate: 5.0e-6
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+scheduler:
+  type: warmup_stable_decay
+  warmup_steps: 100
+  stable_steps: 600
+  decay_steps: 300             # ~1B tokens total
+
+training:
+  micro_batch_size: 2          # 16k is more memory-friendly than 32k
+  gradient_accumulation_steps: 32
+  total_steps: 1000
+  logging_steps: 10
+  save_steps: 200
+  bf16: true
+  gradient_checkpointing: true
+
+parallelism:
+  strategy: fsdp
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    mixed_precision: bf16
+    activation_checkpointing: true
+
+checkpointing:
+  save_total_limit: 3
+
+eval:
+  after_training: true
+  tasks:
+    - needle_16k
+    - ruler_16k

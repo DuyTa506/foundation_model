@@ -1,0 +1,95 @@
+# GRPO / RLVR config for thinking alignment on math + science
+# Uses TRL GRPOTrainer with vLLM rollouts.
+# Starts from outputs/finetune (SFT checkpoint).
+# Reward: correctness (verifiable answer) + format (<think> block) + VI language consistency.
+version: 1
+
+run:
+  name: llama_1b_en_vi_grpo_math
+  output_dir: outputs/rl
+  seed: 42
+
+model:
+  model_id: outputs/finetune       # start from SFT checkpoint
+  tokenizer_id: outputs/tokenizer  # new from-scratch tokenizer
+
+# ── GRPO hyperparameters ──────────────────────────────────────────────────────
+grpo:
+  num_generations: 8               # G completions sampled per prompt
+  max_new_tokens: 2048             # max generation length per rollout
+  temperature: 0.9                 # sampling temperature
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 1.0e-6
+  warmup_steps: 100
+  max_steps: 5000
+  logging_steps: 10
+  save_steps: 500
+  bf16: true
+
+  # KL penalty against reference (SFT model = frozen reference)
+  beta: 0.02
+
+  # Two-stage length schedule (MiniCPM recipe):
+  # Stage 1: normal training (reward drives correctness)
+  # Stage 2 (after length_schedule_step): add overlong penalty to curb runaway thinking
+  length_schedule:
+    enabled: true
+    switch_step: 2500            # switch to stage 2 halfway through
+    stage1_max_tokens: 2048
+    stage2_max_tokens: 1024      # progressively shorter target in stage 2
+    overlong_penalty_weight: 0.1 # penalty per token beyond stage2_max_tokens / max_tokens
+
+# ── Reward functions (scripts/rewards/math_verify.py) ────────────────────────
+rewards:
+  correctness:
+    weight: 1.0
+    extractor: boxed_or_last_number  # \boxed{} first, else last numeric token
+    equivalence: sympy               # sympy-based: 1/2 == 0.5 == 50%
+    reward_correct: 1.0
+    reward_wrong: 0.0
+
+  format:
+    weight: 0.1
+    require_single_think_block: true  # exactly one <think>...</think> per response
+    require_final_answer: true        # answer must follow </think>
+    reward_valid_format: 0.1
+    reward_invalid_format: -0.1
+
+  language_consistency:
+    weight: 0.15
+    # For VI-language prompts: penalize if response drifts to EN/ZH mid-think.
+    # Uses GlotLID to sample 3 random 100-char windows in the <think> trace.
+    # GreenMind recipe: helps avoid code-switching during Vietnamese reasoning.
+    enabled: true
+    target_language_for_vi_prompts: vie_Latn
+    min_vi_confidence: 0.50
+    reward_consistent: 0.1
+    reward_inconsistent: -0.2
+
+# ── Training data (verifiable-answer prompts only) ───────────────────────────
+data:
+  en_math_prompts:
+    - openai/gsm8k              # train split; answers checked as integers
+    - hendrycks/competition_math  # final answer in \boxed{}
+    - AI-MO/NuminaMath          # verifiable subset
+    - open-r1/DAPO-Math-17k     # reasoning-focused
+
+  vi_math_prompts:
+    # (VI prompt, ground-truth answer) pairs — solutions NOT needed, generated online
+    - outputs/rl_data/vi_math_prompts.jsonl  # built by scripts/data/synth_vi_reasoning.py
+    # Contains: translated GSM8K/MATH/NuminaMath questions in Vietnamese
+    # + numeric/\boxed{} answers.
+
+  prompt_format: chatml           # apply the chat template (thinking-mode on)
+  max_prompt_length: 1024
+
+# ── vLLM generation backend ───────────────────────────────────────────────────
+vllm:
+  enabled: true
+  dtype: bfloat16
+  gpu_memory_utilization: 0.85
+  max_model_len: 4096
+
+# ── Optional: DPO post-pass (style/safety) ───────────────────────────────────
+# See training_posttrain_trl_dpo.yaml; run after GRPO if needed.
