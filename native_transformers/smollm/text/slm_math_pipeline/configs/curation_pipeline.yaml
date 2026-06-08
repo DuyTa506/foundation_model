@@ -95,7 +95,7 @@ sources:
   - id: culturax_vi
     hf_dataset: uonlp/CulturaX
     subset: vi
-    split: train
+    split: "train[:20%]"          # 144 GB full → ~29 GB; need ~11B tokens
     text_field: text
     language: vi
     weight: 0.12
@@ -103,7 +103,7 @@ sources:
 
   - id: vi_curated
     hf_dataset: VTSNLP/vietnamese_curated_dataset
-    split: train
+    split: "train[:50%]"          # 35 GB full → ~17 GB; need ~6.5B tokens
     text_field: text
     language: vi
     weight: 0.07
@@ -129,7 +129,7 @@ sources:
 
   - id: madlad_vi
     hf_dataset: Symato/madlad-400_vi
-    split: train
+    split: "train[:20%]"          # 62 GB full → ~12 GB; need ~4.6B tokens
     text_field: text
     language: vi
     weight: 0.05
@@ -137,7 +137,7 @@ sources:
 
   - id: hplt_vi
     hf_dataset: Symato/hplt-vi
-    split: train
+    split: "train[:10%]"          # 92 GB full → ~9 GB; need ~2.8B tokens
     text_field: text
     language: vi
     weight: 0.03
@@ -173,7 +173,7 @@ sources:
   - id: ultradata_math
     hf_dataset: openbmb/UltraData-Math
     subset: UltraData-Math-L2-preview
-    split: train                  # ~5B total, use all
+    split: "train[:15%]"          # 63 GB full → ~9 GB; need ~3.7B tokens
     text_field: text
     language: en
     weight: 0.04
@@ -190,7 +190,7 @@ sources:
 
   - id: pes2o
     hf_dataset: allenai/peS2o
-    split: "train[:20%]"          # need ~1.9B of ~10B available
+    split: "train[:5%]"           # 308 GB full → ~15 GB; need ~1.9B tokens
     text_field: text
     language: en
     weight: 0.02

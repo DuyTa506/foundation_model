@@ -34,20 +34,20 @@ import yaml
 # Sizes of the actual subset being pulled (after name/subset filtering, before split slicing).
 # split slicing (e.g. train[:35%]) is applied on top in estimate_size_gb().
 APPROX_SIZES_GB = {
-    # Vietnamese
-    "epfml/FineWeb2-HQ": 15,               # vie_Latn subset
-    "uonlp/CulturaX": 8,                   # vi subset
-    "VTSNLP/vietnamese_curated_dataset": 2,
-    "wikimedia/wikipedia": 0.5,            # vi subset
-    "Symato/c4_vi-filtered_200GB": 200,    # full dataset; split-sliced in config
-    "Symato/madlad-400_vi": 8,
-    "Symato/hplt-vi": 6,
-    # English math+science
-    "HuggingFaceTB/finemath": 25,          # finemath-4plus subset
-    "open-web-math/open-web-math": 25,
-    "openbmb/UltraData-Math": 5,           # L2-preview subset
-    "HuggingFaceFW/fineweb-edu": 25,       # sample-10BT subset
-    "allenai/peS2o": 40,
+    # Vietnamese — measured from HF repo (subset size, before split slicing)
+    "epfml/FineWeb2-HQ": 63,               # vie_Latn subset (measured)
+    "uonlp/CulturaX": 144,                 # vi subset (measured)
+    "VTSNLP/vietnamese_curated_dataset": 35,  # measured
+    "wikimedia/wikipedia": 0.7,            # 20231101.vi subset (measured)
+    "Symato/c4_vi-filtered_200GB": 47,     # measured (name refers to raw uncompressed)
+    "Symato/madlad-400_vi": 62,            # measured
+    "Symato/hplt-vi": 92,                  # measured
+    # English math+science — measured from HF repo (subset size, before split slicing)
+    "HuggingFaceTB/finemath": 38,          # finemath-4plus subset (measured)
+    "open-web-math/open-web-math": 27,     # measured
+    "openbmb/UltraData-Math": 63,          # L2-preview subset (measured)
+    "HuggingFaceFW/fineweb-edu": 28,       # sample-10BT subset (measured)
+    "allenai/peS2o": 308,                  # measured
 }
 
 
