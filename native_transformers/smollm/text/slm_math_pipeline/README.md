@@ -58,6 +58,26 @@ pip install -r requirements.txt
 
 ## Quickstart
 
+### Stage -1 — Download datasets
+Pre-download all HuggingFace sources before running the curation pipeline.
+This avoids streaming failures mid-curation on slow or interrupted connections.
+
+```bash
+# List what will be downloaded (no actual download)
+python scripts/download_datasets.py --dry_run
+
+# Download all sources (set HF_TOKEN for gated datasets)
+HF_TOKEN=hf_xxx python scripts/download_datasets.py \
+  --cache_dir /data/hf_cache
+
+# Download only specific sources
+python scripts/download_datasets.py \
+  --source_ids vi_hq_web vi_wikipedia en_finemath \
+  --cache_dir /data/hf_cache
+```
+
+Gated datasets that require an HF token: `uonlp/CulturaX`, `openbmb/Ultra-FineWeb`, `openbmb/UltraData-Math`.
+
 ### Stage 0 — Train tokenizer
 ```bash
 python scripts/train_tokenizer.py \
