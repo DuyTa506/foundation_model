@@ -78,10 +78,10 @@ pii:
   replacement: "<|pii|>"
 
 # ── Data sources (VI-first mix; token-share targets) ─────────────────────────
-# VI≈60% / EN≈40%; EN math+science (~24%) kept as STEM backbone.
+# VI≈73% / EN≈27%; EN math+science focused only (no general web).
 sources:
 
-  # ── Vietnamese (60% total) ──────────────────────────────────────────────
+  # ── Vietnamese (~73% total) ─────────────────────────────────────────────
   - id: fineweb2_hq_vi
     hf_dataset: epfml/FineWeb2-HQ
     subset: vie_Latn
@@ -118,6 +118,31 @@ sources:
     weight: 0.05
     role: vi_curated
 
+  - id: c4_vi
+    hf_dataset: Symato/c4_vi-filtered_200GB
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.10
+    role: vi_hq_web
+    note: "Filtered Vietnamese C4 — large and diverse VI web corpus"
+
+  - id: madlad_vi
+    hf_dataset: Symato/madlad-400_vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.05
+    role: vi_web
+
+  - id: hplt_vi
+    hf_dataset: Symato/hplt-vi
+    split: train
+    text_field: text
+    language: vi
+    weight: 0.03
+    role: vi_web
+
   # VI math/science (verified-translated + synth; populated by Stage 4/5)
   - id: vi_math_synth
     hf_dataset: null            # populated by scripts/data/synth_vi_reasoning.py
@@ -126,24 +151,16 @@ sources:
     role: vi_math_synth
     enabled: false              # enable after synth pipeline runs
 
-  # ── English (40% total — math+science backbone) ─────────────────────────
+  # ── English (~27% total — math+science only) ────────────────────────────
   - id: finemath_4plus
     hf_dataset: HuggingFaceTB/finemath
     subset: finemath-4plus
     split: train
     text_field: text
     language: en
-    weight: 0.10
+    weight: 0.12
     role: en_math
-
-  - id: finemath_3plus
-    hf_dataset: HuggingFaceTB/finemath
-    subset: finemath-3plus
-    split: train
-    text_field: text
-    language: en
-    weight: 0.06
-    role: en_math
+    note: "Highest-quality math subset; finemath-3plus dropped (redundant, lower quality tail)"
 
   - id: open_web_math
     hf_dataset: open-web-math/open-web-math
@@ -161,14 +178,6 @@ sources:
     language: en
     weight: 0.04
     role: en_math
-
-  - id: ultra_fineweb_en
-    hf_dataset: openbmb/Ultra-FineWeb
-    split: train
-    text_field: text
-    language: en
-    weight: 0.08
-    role: en_hq_web
 
   - id: fineweb_edu
     hf_dataset: HuggingFaceFW/fineweb-edu

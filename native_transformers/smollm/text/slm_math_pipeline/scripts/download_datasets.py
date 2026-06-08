@@ -34,15 +34,19 @@ import yaml
 # Approximate compressed sizes (GB) for planning — rough estimates only.
 # Actual download size depends on the subset/split requested.
 APPROX_SIZES_GB = {
-    "epfml/FineWeb2-HQ": 500,          # vie subset only ~5-10 GB
-    "uonlp/CulturaX": 300,             # vi subset only ~8 GB
+    # Vietnamese
+    "epfml/FineWeb2-HQ": 500,                    # vie_Latn subset only ~10-20 GB
+    "uonlp/CulturaX": 300,                       # vi subset only ~8 GB
     "VTSNLP/vietnamese_curated_dataset": 2,
-    "wikimedia/wikipedia": 20,          # vi subset only ~0.5 GB
-    "HuggingFaceTB/finemath": 200,     # 3plus+4plus subsets ~50 GB
+    "wikimedia/wikipedia": 20,                    # vi subset only ~0.5 GB
+    "Symato/c4_vi-filtered_200GB": 50,           # filtered VI C4 ~20-50 GB
+    "Symato/madlad-400_vi": 8,
+    "Symato/hplt-vi": 6,
+    # English math+science (no general web)
+    "HuggingFaceTB/finemath": 200,               # 4plus subset only ~25 GB
     "open-web-math/open-web-math": 30,
     "openbmb/UltraData-Math": 10,
-    "openbmb/Ultra-FineWeb": 300,      # en subset sample
-    "HuggingFaceFW/fineweb-edu": 200,  # score>=3 subset
+    "HuggingFaceFW/fineweb-edu": 200,            # sample-10BT ~25 GB
     "allenai/peS2o": 40,
 }
 
