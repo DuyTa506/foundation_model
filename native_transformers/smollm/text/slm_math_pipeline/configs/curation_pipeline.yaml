@@ -120,12 +120,12 @@ sources:
 
   - id: c4_vi
     hf_dataset: Symato/c4_vi-filtered_200GB
-    split: train
+    split: "train[:35%]"
     text_field: text
     language: vi
     weight: 0.24
     role: vi_hq_web
-    note: "Filtered Vietnamese C4 — large and diverse VI web corpus"
+    note: "Filtered Vietnamese C4 — only 35% needed (~25B tokens) for 100B budget"
 
   - id: madlad_vi
     hf_dataset: Symato/madlad-400_vi
@@ -155,7 +155,7 @@ sources:
   - id: finemath_4plus
     hf_dataset: HuggingFaceTB/finemath
     subset: finemath-4plus
-    split: train
+    split: "train[:45%]"          # need ~11B of ~25B available
     text_field: text
     language: en
     weight: 0.12
@@ -164,7 +164,7 @@ sources:
 
   - id: open_web_math
     hf_dataset: open-web-math/open-web-math
-    split: train
+    split: "train[:40%]"          # need ~5.6B of ~15B available
     text_field: text
     language: en
     weight: 0.06
@@ -173,7 +173,7 @@ sources:
   - id: ultradata_math
     hf_dataset: openbmb/UltraData-Math
     subset: UltraData-Math-L2-preview
-    split: train
+    split: train                  # ~5B total, use all
     text_field: text
     language: en
     weight: 0.04
@@ -182,7 +182,7 @@ sources:
   - id: fineweb_edu
     hf_dataset: HuggingFaceFW/fineweb-edu
     subset: sample-10BT
-    split: train
+    split: "train[:40%]"          # need ~3.7B of ~10B available
     text_field: text
     language: en
     weight: 0.04
@@ -190,7 +190,7 @@ sources:
 
   - id: pes2o
     hf_dataset: allenai/peS2o
-    split: train
+    split: "train[:20%]"          # need ~1.9B of ~10B available
     text_field: text
     language: en
     weight: 0.02
