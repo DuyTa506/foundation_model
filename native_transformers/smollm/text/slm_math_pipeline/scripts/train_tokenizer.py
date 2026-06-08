@@ -311,6 +311,9 @@ def main() -> None:
         if val:
             special_tokens.append(val)
     special_tokens.extend(st_cfg.get("chat_tokens", []))
+    special_tokens.extend(st_cfg.get("thinking_tokens", []))
+    special_tokens.extend(st_cfg.get("tool_tokens", []))
+    # Legacy key name kept for backward compat
     special_tokens.extend(st_cfg.get("reasoning_tokens", []))
     reserved = st_cfg.get("reserved", {})
     for i in range(reserved.get("count", 64)):

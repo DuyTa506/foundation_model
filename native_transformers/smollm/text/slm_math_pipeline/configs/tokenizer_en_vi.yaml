@@ -29,21 +29,41 @@ training_corpus:
   max_corpus_tokens: 30_000_000_000
 
 # Special tokens (added as atomic tokens, not split by BPE)
+# IMPORTANT: this is set-in-stone at tokenizer-train time.
+# Adding tokens later requires embedding resize + reinit → destabilizes pretraining.
 special_tokens:
   bos_token: "<bos>"
   eos_token: "<eos>"
   pad_token: "<pad>"           # distinct from EOS — clean loss masking
   unk_token: null              # byte-level BPE never emits <unk>
-  # ChatML delimiters — standard, recognized by vLLM/TRL
+
+  # ChatML delimiters — recognized by vLLM, TRL, transformers
   chat_tokens:
     - "<|im_start|>"
     - "<|im_end|>"
-  # Reasoning tokens: atomic so they're never shattered by BPE merges
-  reasoning_tokens:
+
+  # Thinking control (Qwen3-style: user sends /think or /no_think in last turn)
+  # Cleaner than baking into system prompt; also used as generation prefix
+  thinking_tokens:
     - "<think>"
     - "</think>"
+    - "/think"                 # control: enable thinking for this turn
+    - "/no_think"              # control: skip thinking for this turn
+
+  # Agentic / tool-use tokens (for math code-interpreter and function calling)
+  # Added now so future SFT/RL stages don't need embedding resize
+  tool_tokens:
+    - "<tool_call>"
+    - "</tool_call>"
+    - "<tool_response>"
+    - "</tool_response>"
+    - "<|execute_start|>"      # Python code execution block start
+    - "<|execute_end|>"        # Python code execution block end
+
+  # Reserved for future use (language tags, new control tokens, etc.)
+  # 128 slots: enough buffer without bloating vocab
   reserved:
-    count: 64
+    count: 128
     pattern: "<|reserved_{i}|>"
 
 # Default system prompt (Vietnamese — this is a Vietnamese-first model)
