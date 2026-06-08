@@ -9,7 +9,7 @@ run:
   resume_from_checkpoint: outputs/pretrain_128k   # or pretrain_32k
 
 hardware:
-  gpus_per_node: 8
+  gpus_per_node: 4
   gpu_type: H200
   precision: bf16
 
@@ -54,7 +54,9 @@ scheduler:
 
 training:
   micro_batch_size: 4
-  gradient_accumulation_steps: 16
+  gradient_accumulation_steps: 32
+  # 4 GPU:  4 * 32 * 4 * 8192 = 4,194,304 ≈ 4M tokens/step
+  # 8 GPU:  4 * 16 * 8 * 8192 = 4,194,304  (grad_accum=16)
   total_steps: 5000            # ~10B tokens
   logging_steps: 10
   save_steps: 500

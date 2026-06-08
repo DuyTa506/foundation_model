@@ -1,7 +1,11 @@
-# Base pretraining config: HF Trainer + accelerate/FSDP, from scratch, seq=4096
-# Replaces training_8xH200_megatron_ds_pretrain.yaml (deprecated).
+# Base pretraining config: HF Trainer + accelerate/FSDP, from scratch, seq=4096.
 # Model is loaded from outputs/model_init (random init, NOT from_pretrained).
 # WSD scheduler: Warmup -> Stable -> Exponential Decay (~MiniCPM recipe).
+#
+# GPU count: set gpus_per_node below, or override at launch time:
+#   bash scripts/launch_pretrain_hf.sh --config ... --gpus 4   # 4 GPUs
+#   bash scripts/launch_pretrain_hf.sh --config ... --gpus 6   # 6 GPUs
+# global_batch_tokens scales automatically with GPU count.
 version: 1
 
 run:
@@ -11,10 +15,12 @@ run:
   resume_from_checkpoint: null  # set to checkpoint path to resume
 
 hardware:
-  gpus_per_node: 8
+  gpus_per_node: 4             # set to actual GPU count (4/5/6/7/8)
   num_nodes: 1
   gpu_type: H200
   precision: bf16
+  # To select specific GPU IDs (e.g. when others are busy):
+  #   bash scripts/launch_pretrain_hf.sh --config ... --gpu_ids 4,5,6,7
 
 model:
   config_path: configs/model_llama_1b_en_vi.yaml   # architecture config
@@ -54,9 +60,10 @@ scheduler:
 # ── Batch / steps ─────────────────────────────────────────────────────────────
 training:
   micro_batch_size: 8          # per GPU; tune to fill H200 VRAM at seq=4096
-  gradient_accumulation_steps: 8
-  # global_batch_tokens ≈ micro_batch * grad_accum * num_gpus * seq_len
-  # = 8 * 8 * 8 * 4096 = 2,097,152 ≈ 2M tokens/step  ✓
+  gradient_accumulation_steps: 16
+  # global_batch_tokens = micro_batch * grad_accum * num_gpus * seq_len
+  # 4 GPU:  8 * 16 * 4 * 4096 = 2,097,152 ≈ 2M tokens/step  ✓
+  # 8 GPU:  8 *  8 * 8 * 4096 = 2,097,152 ≈ 2M tokens/step  (grad_accum=8)
   total_steps: 50000           # ~100B tokens at 2M tok/step
   logging_steps: 10
   save_steps: 1000

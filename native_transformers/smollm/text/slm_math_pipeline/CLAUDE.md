@@ -77,9 +77,35 @@ Only after smoke test passes, switch to production configs:
 # Init full 0.88B model
 python scripts/init_model_from_scratch.py --config configs/model_llama_1b_en_vi.yaml
 
-# Base pretrain with wandb logging
-bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml
+# Base pretrain — 4 GPUs, any IDs
+bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml \
+  --gpu_ids 4,5,6,7
+
+# Adjust GPU count or IDs at any time without touching yaml:
+bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml \
+  --gpu_ids 0,1,2,3          # GPUs 0-3
+bash scripts/launch_pretrain_hf.sh --config configs/training_8xH200_hf_pretrain.yaml \
+  --gpus 6                   # first 6 GPUs (0-5)
 ```
+
+**GPU config fields (in every training yaml):**
+```yaml
+hardware:
+  gpus_per_node: 4           # default GPU count; overridden by --gpus / --gpu_ids
+```
+
+**Batch size is pre-calibrated for 4 GPUs.** `gradient_accumulation_steps` in each
+config is set so that `global_batch_tokens = micro_batch × grad_accum × gpus × seq_len`
+stays constant. If you switch to 8 GPUs, halve the `gradient_accumulation_steps`:
+
+| Config | seq | grad_accum (4 GPU) | grad_accum (8 GPU) | tok/step |
+|---|---|---|---|---|
+| base pretrain | 4096 | 16 | 8 | 2M |
+| longctx 16k | 16384 | 64 | 32 | 8M |
+| longctx 32k | 32768 | 128 | 64 | 16M |
+| longctx 64k | 65536 | 192 | 96 | 50M |
+| longctx 128k | 131072 | 256 | 128 | 134M |
+| midtrain | 8192 | 32 | 16 | 4M |
 
 ### Smoke test for GRPO
 ```bash

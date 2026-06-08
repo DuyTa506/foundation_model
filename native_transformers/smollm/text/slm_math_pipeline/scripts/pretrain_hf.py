@@ -448,7 +448,7 @@ def main() -> None:
     global_batch_tokens = (
         train_cfg["micro_batch_size"]
         * train_cfg["gradient_accumulation_steps"]
-        * int(os.environ.get("WORLD_SIZE", "8"))
+        * int(os.environ.get("WORLD_SIZE", str(cfg.get("hardware", {}).get("gpus_per_node", 8))))
         * max_seq_length
     )
 
