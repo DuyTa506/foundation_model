@@ -125,40 +125,106 @@ def corpus_iterator_from_dirs(corpus_dirs: list[Path]) -> Iterator[str]:
 _CHARS_PER_TOKEN = {"vi": 4.0, "en": 4.5, "default": 4.5}
 
 
+def _iter_parquet_rows(folder: Path) -> Iterator[dict]:
+    """Yield {"text": ...} rows from a folder of parquet shards (download_datasets.py
+    output, where the text column is normalized to "text")."""
+    import pyarrow.parquet as pq
+
+    for p in sorted(Path(folder).glob("*.parquet")):
+        pf = pq.ParquetFile(str(p))
+        cols = ["text"] if "text" in pf.schema_arrow.names else None
+        for batch in pf.iter_batches(batch_size=1000, columns=cols):
+            d = batch.to_pydict()
+            col = "text" if "text" in d else next(iter(d))
+            for v in d[col]:
+                yield {"text": v}
+
+
+def _arrow_cached(
+    hf_dataset: str, subset: str | None, cache_dir: str | None, hf_token: str | None
+) -> bool:
+    """True if a non-streaming arrow cache for this dataset already exists under
+    cache_dir — i.e. an earlier full download we can reuse with streaming=False
+    (no network). Probes metadata only; never downloads the data itself."""
+    if not cache_dir:
+        return False
+    try:
+        from datasets import load_dataset_builder
+        builder = load_dataset_builder(
+            hf_dataset, name=subset, cache_dir=cache_dir, token=hf_token
+        )
+        cdir = builder.cache_dir
+    except Exception:
+        return False
+    if not cdir or not os.path.isdir(cdir):
+        return False
+    for _root, _dirs, files in os.walk(cdir):
+        if any(f.endswith(".arrow") for f in files):
+            return True
+    return False
+
+
 def _iter_hf_source(
     src: dict,
     max_chars: int,
     cache_dir: str | None,
     hf_token: str | None,
     shuffle_seed: int = 42,
+    streamed_root: Path | None = None,
 ) -> Iterator[str]:
-    """Stream NFC-normalized text from one HF dataset source, capped at max_chars."""
-    from datasets import load_dataset
+    """Yield NFC-normalized text from one source, capped at max_chars.
 
+    Source priority mirrors curate/00_materialize.py so we reuse already-downloaded
+    data instead of re-fetching over the network:
+      1. <streamed_root>/<id>/ parquet  (new fraction-aware download)  → read directly
+      2. existing HF arrow cache under cache_dir (old full download)   → load_dataset(streaming=False)
+      3. neither present                                               → load_dataset(streaming=True)
+    """
     import re as _re
+
+    src_id = src.get("id")
     hf_dataset = src["hf_dataset"]
-    # Streaming does not support percentage slicing (train[:40%]).
-    # Strip it — the char budget already limits how much we read.
-    split = _re.sub(r'\[.*?\]', '', src.get("split", "train")).strip() or "train"
+    subset = src.get("subset")
     text_field = src.get("text_field", "text")
+    # Streaming does not support percentage slicing (train[:40%]); the char budget
+    # bounds how much we read anyway. For arrow reuse the slice is irrelevant — the
+    # arrow holds the full split — so strip it in both cases.
+    split = _re.sub(r'\[.*?\]', '', src.get("split", "train")).strip() or "train"
 
-    load_kwargs: dict = dict(
-        path=hf_dataset,
-        split=split,
-        streaming=True,
-        token=hf_token,
-    )
-    if src.get("subset"):
-        load_kwargs["name"] = src["subset"]
-    if cache_dir:
-        load_kwargs["cache_dir"] = cache_dir
+    rows: Iterator[dict] | None = None
+    read_field = text_field
 
-    try:
-        ds = load_dataset(**load_kwargs)
-        ds = ds.shuffle(seed=shuffle_seed, buffer_size=10_000)
-    except Exception as e:
-        print(f"  [warn] could not load {hf_dataset}: {e} — skipping")
-        return
+    streamed_src = (Path(streamed_root) / src_id) if (streamed_root and src_id) else None
+    if streamed_src and (streamed_src / ".done").exists():
+        print(f"  [{src_id}] <- streamed parquet {streamed_src}  (no network)")
+        rows = _iter_parquet_rows(streamed_src)
+        read_field = "text"  # download_datasets.py normalizes the column to "text"
+    elif _arrow_cached(hf_dataset, subset, cache_dir, hf_token):
+        print(f"  [{src_id}] <- arrow cache under {cache_dir}  (no network)")
+        try:
+            from datasets import load_dataset
+            kw: dict = dict(path=hf_dataset, split=split, streaming=False,
+                            token=hf_token, cache_dir=cache_dir)
+            if subset:
+                kw["name"] = subset
+            rows = iter(load_dataset(**kw))
+        except Exception as e:
+            print(f"  [warn] arrow reuse failed for {hf_dataset}: {e} — streaming instead")
+            rows = None
+
+    if rows is None:
+        from datasets import load_dataset
+        kw = dict(path=hf_dataset, split=split, streaming=True, token=hf_token)
+        if subset:
+            kw["name"] = subset
+        if cache_dir:
+            kw["cache_dir"] = cache_dir
+        try:
+            ds = load_dataset(**kw)
+            rows = iter(ds.shuffle(seed=shuffle_seed, buffer_size=10_000))
+        except Exception as e:
+            print(f"  [warn] could not load {hf_dataset}: {e} — skipping")
+            return
 
     try:
         from tqdm import tqdm as _tqdm
@@ -171,8 +237,8 @@ def _iter_hf_source(
 
     chars_yielded = 0
     try:
-        for row in ds:
-            text = row.get(text_field) or row.get("text") or row.get("content") or ""
+        for row in rows:
+            text = row.get(read_field) or row.get("text") or row.get("content") or ""
             if not isinstance(text, str) or len(text) < 50:
                 continue
             text = unicodedata.normalize("NFC", text)
@@ -193,6 +259,7 @@ def build_balanced_iterator(
     curation_cfg: dict,
     cache_dir: str | None,
     hf_token: str | None,
+    streamed_root: Path | None = None,
 ) -> Iterator[str]:
     """
     Build a VI/EN balanced corpus iterator from HF datasets.
@@ -234,14 +301,14 @@ def build_balanced_iterator(
         if budget < 1_000_000:  # skip if <1M chars
             continue
         print(f"  vi  {src['id']:25s}  budget={budget/1e9:.2f}B chars")
-        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed))
+        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed, streamed_root))
 
     for src in en_sources:
         budget = int(en_budget_chars * src.get("weight", 0) / en_w_total)
         if budget < 1_000_000:
             continue
         print(f"  en  {src['id']:25s}  budget={budget/1e9:.2f}B chars")
-        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed))
+        source_iters.append(_iter_hf_source(src, budget, cache_dir, hf_token, seed, streamed_root))
 
     # Round-robin interleave: ensures VI+EN mixed throughout BPE training
     active = [iter(it) for it in source_iters]
@@ -388,7 +455,15 @@ def main() -> None:
                 if s.get("id") in args.source_ids
             ]
             print(f"[tokenizer] --source_ids filter: {args.source_ids}")
-        iterator = build_balanced_iterator(cfg, curation_cfg, args.cache_dir, args.hf_token)
+        # Reuse already-downloaded data when present (mirrors 00_materialize.py):
+        # <cache_dir>/streamed/ (new download) → arrow cache under cache_dir → stream.
+        streamed_root = Path(args.cache_dir) / "streamed" if args.cache_dir else None
+        if streamed_root:
+            status = "found" if streamed_root.exists() else "not present"
+            print(f"[tokenizer] streamed cache: {streamed_root}  [{status}]")
+        iterator = build_balanced_iterator(
+            cfg, curation_cfg, args.cache_dir, args.hf_token, streamed_root
+        )
 
     # ── Train ───────────────────────────────────────────────────────────────
     trainer = trainers.BpeTrainer(

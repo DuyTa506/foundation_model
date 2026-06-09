@@ -119,10 +119,17 @@ Gated datasets requiring HF token: `uonlp/CulturaX`, `openbmb/UltraData-Math`.
 
 ### Stage 0 — Train tokenizer
 
-The tokenizer reads **directly from the HF datasets cache** — no need to run `00_materialize.py` first.
-Corpus composition is controlled by `training_corpus` in `configs/tokenizer_en_vi.yaml`:
-`vi_ratio=0.60`, `en_ratio=0.40`, `max_corpus_tokens=30B`.
-Each source is budget-capped by weight and round-robin interleaved for diversity.
+No need to run `00_materialize.py` first. Corpus composition is controlled by
+`training_corpus` in `configs/tokenizer_en_vi.yaml`: `vi_ratio=0.60`, `en_ratio=0.40`,
+`max_corpus_tokens=30B`. Each source is budget-capped by weight and round-robin
+interleaved for diversity, then read with a per-source character budget (never the full dataset).
+
+> **Reuses already-downloaded data** (same 3-tier priority as `00_materialize.py`), so a
+> server that already has the data does **no** network fetch:
+> 1. `<cache_dir>/streamed/<id>/` (new fraction-aware download) → read parquet directly
+> 2. existing HF arrow cache under `--cache_dir` (old full download) → `streaming=False` reuse
+> 3. neither present → `streaming=True` from the Hub (bounded by the char budget, *not* a
+>    full re-download)
 
 ```bash
 # Primary mode: read directly from HF cache (recommended)
