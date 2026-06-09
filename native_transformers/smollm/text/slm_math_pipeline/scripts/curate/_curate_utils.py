@@ -11,6 +11,38 @@ import os
 from pathlib import Path
 
 
+def run_with_hf_retry(executor, max_retries: int = 8, base_delay: float = 10.0):
+    """Run a datatrove executor, retrying on HuggingFace 429 rate-limit errors.
+
+    When ``00_materialize`` reads directly from HF, every datatrove task calls
+    ``load_dataset`` and hits HF's file-listing API. With many tasks this bursts past
+    HF's 1000-requests / 5-min cap -> ``HfHubHTTPError: 429 Too Many Requests`` (the
+    response carries a ``Retry-After`` seconds hint). The executor uses
+    ``skip_completed=True``, so a retry resumes from where it stopped rather than
+    redoing finished shards. We honor ``Retry-After`` when present, else exponential
+    backoff. The real cure is fewer concurrent API callers (cap tasks) and/or the
+    streamed-parquet path; this is the safety net.
+    """
+    import re
+    import time
+
+    for attempt in range(max_retries + 1):
+        try:
+            executor.run()
+            return
+        except Exception as e:  # noqa: BLE001 - inspect message for rate-limit shape
+            msg = str(e)
+            is_rate_limit = "429" in msg or "Too Many Requests" in msg or "rate limit" in msg.lower()
+            if not is_rate_limit or attempt == max_retries:
+                raise
+            m = re.search(r"[Rr]etry after (\d+)", msg)
+            delay = int(m.group(1)) if m else base_delay * (2 ** attempt)
+            delay = min(delay, 300)  # cap a single wait at 5 min
+            print(f"[hf-retry] 429 rate limit (attempt {attempt + 1}/{max_retries}); "
+                  f"sleeping {delay:.0f}s then resuming (skip_completed keeps progress)")
+            time.sleep(delay)
+
+
 def stable_metadata_adapter(keep_keys=("source", "dataset", "language"), defaults=None):
     """Return a datatrove ParquetWriter ``adapter`` that projects every document to a
     FIXED, type-stable schema: ``{text:str, id:str, metadata:{<keep_keys>:str}}``.

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import stable_metadata_adapter
+from _curate_utils import run_with_hf_retry, stable_metadata_adapter
 
 
 def _check_datatrove():
@@ -81,6 +81,7 @@ def materialize_source(
 
     # ── Source selection: prefer local streamed parquet over re-downloading from HF ──
     streamed_src = (streamed_root / src_id) if streamed_root else None
+    uses_hf_api = False  # True when reading directly from HF (load_dataset hits the API)
     if streamed_src and (streamed_src / ".done").exists():
         # download_datasets.py already pulled the correct fraction and normalized
         # the text column to "text". Read it directly — no network, no big arrow.
@@ -94,6 +95,7 @@ def materialize_source(
             limit=max_rows if max_rows else -1,
         )
     else:
+        uses_hf_api = True
         if streamed_root:
             print(f"[materialize] {src_id}: no streamed cache at {streamed_src}, "
                   f"falling back to HF (reuses existing arrow cache if present)")
@@ -132,14 +134,29 @@ def materialize_source(
         ),
     )
 
+    # When reading straight from HF, EVERY task calls load_dataset and hits HF's
+    # file-listing API. With tasks = cpu_count-2 (e.g. 118) that bursts past HF's
+    # 1000-req/5-min cap -> 429 Too Many Requests. The download is IO-bound, not
+    # CPU-bound, so cap concurrent API callers; the streamed-parquet path is local
+    # and keeps full parallelism. Override the cap with MATERIALIZE_HF_TASKS.
+    if uses_hf_api:
+        hf_cap = int(os.environ.get("MATERIALIZE_HF_TASKS", "8"))
+        n_tasks = max(1, min(num_workers, hf_cap))
+        if n_tasks < num_workers:
+            print(f"[materialize] {src_id}: capping HF tasks {num_workers} -> {n_tasks} "
+                  f"to avoid HF API rate limits (set MATERIALIZE_HF_TASKS to change)")
+    else:
+        n_tasks = num_workers
+
     executor = LocalPipelineExecutor(
         pipeline=[reader, writer],
-        tasks=num_workers,
-        workers=num_workers,
+        tasks=n_tasks,
+        workers=n_tasks,
         logging_dir=str(src_out / "logs"),
         skip_completed=True,
     )
-    executor.run()
+    # Retry on transient HF 429s; skip_completed makes a retry resume, not restart.
+    run_with_hf_retry(executor)
 
     # Count rows from parquet metadata (cheap — no full read)
     import pyarrow.parquet as pq
