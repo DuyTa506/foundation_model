@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import prune_empty_parquet
+from _curate_utils import prune_empty_parquet, stable_metadata_adapter
 
 # PII patterns
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
@@ -64,6 +64,8 @@ def run_pii(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
                     output_folder=output_dir,
                     output_filename="${rank}.parquet",
                     compression="snappy",
+                    adapter=stable_metadata_adapter(
+                        keep_keys=("source", "dataset", "language")),
                 ),
             ],
             tasks=workers,
@@ -90,6 +92,8 @@ def run_pii(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
                     output_folder=output_dir,
                     output_filename="${rank}.parquet",
                     compression="snappy",
+                    adapter=stable_metadata_adapter(
+                        keep_keys=("source", "dataset", "language")),
                 ),
             ],
             tasks=workers,

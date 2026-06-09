@@ -60,9 +60,14 @@ def stable_reader_adapter(keep_keys=("source", "dataset", "language"), defaults=
     we never touch ``_default_adapter`` at all — version-proof — and we emit the same
     uniform ``{source,dataset,language}`` string schema the rest of the chain expects.
 
-    Values are pulled from the raw row first (top-level key, then a nested ``metadata``
-    dict if present), else from ``defaults`` (e.g. ``{"source": src_id, ...}``), coerced
-    to ``str``; missing keys become ``""`` so every document of every source is identical.
+    Precedence per key: ``defaults`` WINS when the key is provided there, else fall back
+    to the raw row (top-level, then a nested ``metadata`` dict). This is deliberate: at
+    materialize we know the authoritative source/dataset/language from the pipeline config,
+    and several HF sources ship their OWN ``source``/``language`` columns (e.g. CulturaX's
+    ``source`` is "mC4"/"OSCAR", FineWeb's ``language`` is "en") — letting those override
+    would corrupt source attribution and break stage-03 language routing. Values are
+    coerced to ``str``; missing keys become ``""`` so every document of every source is
+    identical.
     """
     defaults = defaults or {}
 
@@ -79,7 +84,12 @@ def stable_reader_adapter(keep_keys=("source", "dataset", "language"), defaults=
             nested = {}
         out = {}
         for k in keep_keys:
-            v = data.get(k, nested.get(k, defaults.get(k, "")))
+            # config-provided defaults are authoritative; only consult the row when the
+            # pipeline config is silent about this key.
+            if k in defaults and defaults[k] not in (None, ""):
+                v = defaults[k]
+            else:
+                v = data.get(k, nested.get(k, defaults.get(k, "")))
             out[k] = "" if v is None else str(v)
         text = data.get(self.text_key, "")
         doc_id = data.get(self.id_key)

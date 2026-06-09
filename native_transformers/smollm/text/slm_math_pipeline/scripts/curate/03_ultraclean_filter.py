@@ -37,81 +37,120 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import prune_empty_parquet
+from _curate_utils import prune_empty_parquet, stable_metadata_adapter
 
 
 def _train_vi_fasttext_classifier(
-    hq_vi_dir: Path,
-    lq_vi_dir: Path,
+    input_dir: Path,
     output_path: Path,
+    hq_source: str = "fineweb2_hq_vi",
     max_samples: int = 500_000,
-) -> None:
-    """Train a fastText binary classifier: HQ=__label__pos, LQ=__label__neg."""
+    min_seeds: int = 200,
+) -> bool:
+    """Train a fastText HQ/LQ classifier for Vietnamese from the stage's OWN input.
+
+    Returns True on success, False if it could not train (too few seeds, fastText
+    error, …). Callers MUST treat False as "use heuristics" and continue — this never
+    raises, so an unattended pipeline never dies here.
+
+    Seed selection is layout-agnostic: after stage 01 the per-source subdirs are gone
+    (docs are mixed into ``${rank}.parquet`` and tagged by ``metadata['source']``), so we
+    read the mixed parquet in ``input_dir`` and pick positives by metadata — preferring
+    the configured HQ source, then ANY Vietnamese doc. Negatives are synthetic word-shuffle
+    degradations of the positives (no second hardcoded source dir needed).
+    """
     try:
-        import fasttext
+        import fasttext  # noqa: F401
     except ImportError:
-        raise RuntimeError("pip install fasttext")
+        print("[ultraclean_vi] fasttext not installed; cannot train, will use heuristics")
+        return False
 
     import random
     import unicodedata
+    import pyarrow.parquet as pq
 
-    def _read_texts(directory: Path, label: str, n: int) -> list[str]:
-        texts = []
-        for p in sorted(directory.rglob("*.parquet")):
+    def _iter_rows():
+        for p in sorted(Path(input_dir).rglob("*.parquet")):
+            if f"{os.sep}logs{os.sep}" in str(p):
+                continue
             try:
-                import pyarrow.parquet as pq
-                tbl = pq.read_table(str(p), columns=["text"])
-                for t in tbl["text"].to_pylist():
-                    if isinstance(t, str) and t.strip():
-                        # One line per sample for fastText
-                        clean = unicodedata.normalize("NFC", t).replace("\n", " ")[:512]
-                        texts.append(f"{label} {clean}")
-                        if len(texts) >= n:
-                            return texts
+                tbl = pq.read_table(str(p), columns=["text", "metadata"])
             except Exception:
-                pass
-        return texts
+                continue
+            texts = tbl.column("text").to_pylist()
+            metas = (tbl.column("metadata").to_pylist()
+                     if "metadata" in tbl.column_names else [{}] * len(texts))
+            for t, m in zip(texts, metas):
+                yield t, (m or {})
 
-    print(f"[ultraclean_vi] reading HQ VI seeds from {hq_vi_dir}")
-    pos = _read_texts(hq_vi_dir, "__label__pos", max_samples // 2)
-    print(f"[ultraclean_vi] {len(pos):,} positive samples")
+    def _is_vi(meta: dict) -> bool:
+        lang = str(meta.get("language", ""))
+        return lang == "vi" or "vie" in lang
 
-    if not lq_vi_dir.exists():
-        # Generate LQ negatives by shuffling character windows (synthetic degradation)
-        import random
+    def _clean(t: str) -> str:
+        return unicodedata.normalize("NFC", t).replace("\n", " ")[:512]
 
-        def _degrade(text: str) -> str:
-            words = text.split()
-            random.shuffle(words)
-            return " ".join(words[:50])
+    # Pass 1: HQ source only. Pass 2 (if too few): any VI doc.
+    pos: list[str] = []
+    for prefer_hq in (True, False):
+        if len(pos) >= min_seeds and prefer_hq:
+            break
+        for t, m in _iter_rows():
+            if not (isinstance(t, str) and t.strip()) or not _is_vi(m):
+                continue
+            if prefer_hq and str(m.get("source", "")) != hq_source:
+                continue
+            pos.append(f"__label__pos {_clean(t)}")
+            if len(pos) >= max_samples // 2:
+                break
+        if len(pos) >= min_seeds:
+            break
+        if prefer_hq:
+            print(f"[ultraclean_vi] only {len(pos)} HQ-source seeds; widening to any VI doc")
+            pos = []  # restart, collect from all VI docs in pass 2
 
-        neg = [f"__label__neg {_degrade(t.split(' ', 1)[-1])}" for t in pos[:len(pos)]]
-    else:
-        neg = _read_texts(lq_vi_dir, "__label__neg", max_samples // 2)
-    print(f"[ultraclean_vi] {len(neg):,} negative samples")
+    print(f"[ultraclean_vi] {len(pos):,} positive (VI) samples")
+    if len(pos) < min_seeds:
+        print(f"[ultraclean_vi] too few VI seeds (<{min_seeds}); skipping training "
+              f"(heuristic pass-through for VI)")
+        return False
 
+    def _degrade(text: str) -> str:
+        words = text.split()
+        random.shuffle(words)
+        return " ".join(words[:50])
+
+    neg = [f"__label__neg {_degrade(t.split(' ', 1)[-1])}" for t in pos]
     combined = pos + neg
     random.shuffle(combined)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt",
-                                    delete=False, encoding="utf-8") as f:
-        f.write("\n".join(combined) + "\n")
-        train_file = f.name
-
-    model = fasttext.train_supervised(
-        input=train_file,
-        epoch=10,
-        lr=0.5,
-        wordNgrams=2,
-        dim=256,
-        minCount=2,
-        loss="softmax",
-        verbose=2,
-    )
-    model.save_model(str(output_path))
-    os.unlink(train_file)
-    print(f"[ultraclean_vi] classifier saved -> {output_path}")
+    train_file = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt",
+                                         delete=False, encoding="utf-8") as f:
+            f.write("\n".join(combined) + "\n")
+            train_file = f.name
+        model = fasttext.train_supervised(
+            input=train_file,
+            epoch=10,
+            lr=0.5,
+            wordNgrams=2,
+            dim=256,
+            minCount=1,   # tiny corpora must not trip "Empty vocabulary"
+            loss="softmax",
+            verbose=2,
+        )
+        model.save_model(str(output_path))
+        print(f"[ultraclean_vi] classifier saved -> {output_path}")
+        return True
+    except Exception as e:  # noqa: BLE001 - training must never kill the pipeline
+        print(f"[ultraclean_vi] training failed ({type(e).__name__}: {e}); "
+              f"using heuristic pass-through for VI")
+        return False
+    finally:
+        if train_file and os.path.exists(train_file):
+            os.unlink(train_file)
 
 
 def classify_and_filter(
@@ -187,10 +226,18 @@ def classify_and_filter(
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True),
             LambdaFilter(filter_function=_classify),
+            # _classify mutates metadata (ultraclean_label/score) only for docs it
+            # actually classifies — pass-through docs (no model for their language) get
+            # nothing. That makes the per-doc metadata struct heterogeneous within one
+            # writer batch -> pyarrow "Table schema does not match schema used to create
+            # file". Re-project to the uniform {source,dataset,language} schema so every
+            # row is identical regardless of which branch _classify took.
             ParquetWriter(
                 output_folder=output_dir,
                 output_filename="${rank}.parquet",
                 compression="snappy",
+                adapter=stable_metadata_adapter(
+                    keep_keys=("source", "dataset", "language")),
             ),
         ],
         tasks=workers,
@@ -209,9 +256,9 @@ def main() -> None:
     parser.add_argument("--vi_classifier_path", default=None,
                         help="Path to trained VI fastText classifier (.bin). "
                              "Will train if not provided.")
-    parser.add_argument("--hq_vi_dir",
-                        default="outputs/curated/lang_filtered/fineweb2_hq_vi",
-                        help="HQ VI seed dir for classifier training.")
+    parser.add_argument("--hq_vi_source", default=None,
+                        help="metadata['source'] id whose VI docs seed the HQ classifier "
+                             "(default: ultraclean.vi.hq_seed_source or 'fineweb2_hq_vi').")
     parser.add_argument("--skip_train_vi", action="store_true",
                         help="Skip VI classifier training (use heuristics only).")
     parser.add_argument("--workers", type=int, default=max(1, os.cpu_count() - 2))
@@ -242,19 +289,36 @@ def main() -> None:
         "vi", {}
     ).get("classifier_path")
 
+    fallback_ok: bool = uc_cfg.get("vi", {}).get("fallback_to_heuristics", True)
     if not vi_classifier_path or not Path(vi_classifier_path).exists():
         if args.skip_train_vi:
             print("[ultraclean] skipping VI classifier training; using heuristics")
             vi_classifier_path = None
         else:
+            hq_source = (args.hq_vi_source
+                         or uc_cfg.get("vi", {}).get("hq_seed_source", "fineweb2_hq_vi"))
             vi_out = Path("outputs/ultraclean_vi/vi_classifier.bin")
-            print(f"[ultraclean] training VI classifier -> {vi_out}")
-            _train_vi_fasttext_classifier(
-                hq_vi_dir=Path(args.hq_vi_dir),
-                lq_vi_dir=Path("outputs/curated/lang_filtered/c4_vi"),
-                output_path=vi_out,
-            )
-            vi_classifier_path = str(vi_out)
+            print(f"[ultraclean] training VI classifier -> {vi_out} "
+                  f"(HQ seed source='{hq_source}')")
+            # Never fatal: on any failure fall back to heuristic pass-through so an
+            # unattended large-scale run keeps going instead of dying at this stage.
+            try:
+                trained = _train_vi_fasttext_classifier(
+                    input_dir=Path(args.input_dir),
+                    output_path=vi_out,
+                    hq_source=hq_source,
+                )
+            except Exception as e:  # noqa: BLE001 - belt-and-suspenders
+                print(f"[warn] VI classifier training errored ({e})")
+                trained = False
+            if trained:
+                vi_classifier_path = str(vi_out)
+            elif fallback_ok:
+                print("[ultraclean] VI classifier unavailable; heuristic pass-through for VI")
+                vi_classifier_path = None
+            else:
+                raise SystemExit("VI classifier training failed and "
+                                 "fallback_to_heuristics is disabled")
 
     prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)

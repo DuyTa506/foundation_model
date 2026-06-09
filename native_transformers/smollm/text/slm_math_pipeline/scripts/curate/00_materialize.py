@@ -127,6 +127,11 @@ def materialize_source(
             dataset_options["name"] = subset
         if cache_dir:
             dataset_options["cache_dir"] = str(cache_dir)
+        # Some datasets ship a Python loader script that datasets>=4 refuses; point at a
+        # specific revision (e.g. the auto-converted `refs/convert/parquet` branch) instead.
+        revision = source_cfg.get("revision")
+        if revision:
+            dataset_options["revision"] = revision
         reader = HuggingFaceDatasetReader(
             dataset=hf_dataset,
             dataset_options=dataset_options,

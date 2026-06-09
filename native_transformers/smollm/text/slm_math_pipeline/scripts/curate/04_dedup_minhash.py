@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import prune_empty_parquet
+from _curate_utils import prune_empty_parquet, stable_metadata_adapter
 
 
 def run_dedup(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
@@ -112,10 +112,14 @@ def run_dedup(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True),
             MinhashDedupFilter(input_folder=remove_dir),
+            # Keep the on-disk metadata struct uniform across all writer tasks (defensive:
+            # guarantees no schema drift accumulates regardless of worker count).
             ParquetWriter(
                 output_folder=output_dir,
                 output_filename="${rank}.parquet",
                 compression="snappy",
+                adapter=stable_metadata_adapter(
+                    keep_keys=("source", "dataset", "language")),
             ),
         ],
         tasks=workers,

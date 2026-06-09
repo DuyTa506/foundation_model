@@ -174,7 +174,7 @@ sources:
     hf_dataset: openbmb/UltraData-Math
     subset: UltraData-Math-L2-preview
     split: "train[:15%]"          # 63 GB full → ~9 GB; need ~3.7B tokens
-    text_field: text
+    text_field: content           # this dataset's columns are [content, quality_label] — no `text`
     language: en
     weight: 0.04
     role: en_math
@@ -190,6 +190,10 @@ sources:
 
   - id: pes2o
     hf_dataset: allenai/peS2o
+    # peS2o ships a Python loader script (peS2o.py); datasets>=4 refuses script datasets
+    # ("Dataset scripts are no longer supported"). Read the HF auto-converted parquet
+    # branch instead — same rows, columns [added, created, id, source, text, version].
+    revision: refs/convert/parquet
     split: "train[:5%]"           # 308 GB full → ~15 GB; need ~1.9B tokens
     text_field: text
     language: en

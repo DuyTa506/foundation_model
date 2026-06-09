@@ -25,7 +25,7 @@ from typing import FrozenSet
 
 import yaml
 
-from _curate_utils import prune_empty_parquet
+from _curate_utils import prune_empty_parquet, stable_metadata_adapter
 
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -107,10 +107,13 @@ def decontaminate(
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True),
             LambdaFilter(filter_function=_is_clean),
+            # Uniform metadata struct regardless of the (dropped-only) decontam_dropped flag.
             ParquetWriter(
                 output_folder=output_dir,
                 output_filename="${rank}.parquet",
                 compression="snappy",
+                adapter=stable_metadata_adapter(
+                    keep_keys=("source", "dataset", "language")),
             ),
         ],
         tasks=workers,
