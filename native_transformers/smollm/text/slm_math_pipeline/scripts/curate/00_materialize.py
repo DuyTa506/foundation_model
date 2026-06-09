@@ -99,7 +99,10 @@ def materialize_source(
               f"text_field={text_field}")
         # Pass cache_dir so load_dataset reuses an already-downloaded arrow cache
         # (the "old server" case) instead of re-downloading.
-        dataset_options: dict = {}
+        # NOTE: datatrove's HuggingFaceDatasetReader has NO top-level `split` kwarg —
+        # split/name/cache_dir all go inside dataset_options, which it forwards to
+        # load_dataset(dataset, **dataset_options).
+        dataset_options: dict = {"split": split}
         if subset:
             dataset_options["name"] = subset
         if cache_dir:
@@ -107,10 +110,9 @@ def materialize_source(
         reader = HuggingFaceDatasetReader(
             dataset=hf_dataset,
             dataset_options=dataset_options,
-            split=split,
             text_key=text_field,
             progress=True,
-            limit=max_rows,
+            limit=max_rows if max_rows else -1,
         )
 
     writer = ParquetWriter(
