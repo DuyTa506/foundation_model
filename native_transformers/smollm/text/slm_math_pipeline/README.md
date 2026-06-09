@@ -115,7 +115,10 @@ python scripts/download_sft_rl_datasets.py --stages sft \
   --cache_dir /data/hf_cache
 ```
 
-Gated datasets requiring HF token: `uonlp/CulturaX`, `openbmb/UltraData-Math`.
+Gated datasets requiring an HF token (set `HF_TOKEN` / `huggingface-cli login` **and**
+accept each license on its Hub page): `uonlp/CulturaX`, `Symato/c4_vi-filtered_200GB`,
+`Symato/hplt-vi`, `openbmb/UltraData-Math`. Without access these fail at materialize with
+`DatasetNotFoundError: ... is a gated dataset`.
 
 ### Stage 0 — Train tokenizer
 
@@ -192,6 +195,22 @@ python scripts/curate/06_pii_redact.py
 python scripts/curate/07_tokenize_pack.py \
   --tokenizer_path outputs/tokenizer
 ```
+
+> **Curation is built to run unattended at high worker counts.** Every stage writer
+> emits one uniform `{source,dataset,language}` metadata schema, so heterogeneous
+> per-source fields can never crash a writer mid-run; stage 03's VI classifier trains
+> from the stage's own input (by `metadata['source']`) and falls back to heuristics
+> instead of aborting if seeds are scarce; stage 00 throttles + retries HF rate limits.
+>
+> **Validate all sources cheaply before a cluster run** — stream a tiny slice of every
+> configured source through the real adapters and check each yields a populated `text`:
+> ```bash
+> HF_TOKEN=hf_xxx python scripts/curate/_test_all_sources.py \
+>   --config configs/curation_pipeline.yaml \
+>   --output_dir outputs/_alltest/raw --limit 150
+> ```
+> This catches per-source surprises (wrong `text_field`, script-only datasets, gated
+> access) in seconds rather than hours into a full materialize.
 
 ### Local smoke test (before scaling)
 
@@ -380,6 +399,12 @@ EN is restricted to math+science only — no general English web text.
 
 All large datasets use split slicing (e.g. `train[:35%]`) to limit download size.
 Total download: ~212 GB.
+
+> **Per-source quirks** (handled in `configs/curation_pipeline.yaml`): `UltraData-Math`
+> stores text in a `content` column (not `text`); `peS2o` ships a Python loader script
+> that `datasets>=4` rejects, so it's read from the auto-converted parquet branch via
+> `revision: refs/convert/parquet`. Each source's authoritative `source`/`language`
+> come from the config, not the dataset's own columns.
 
 ### SFT format
 
