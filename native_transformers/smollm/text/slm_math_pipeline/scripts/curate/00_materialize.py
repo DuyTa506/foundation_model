@@ -28,6 +28,8 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import stable_metadata_adapter
+
 
 def _check_datatrove():
     try:
@@ -115,10 +117,19 @@ def materialize_source(
             limit=max_rows if max_rows else -1,
         )
 
+    # Normalize EVERY source to one uniform metadata schema {source,dataset,language}.
+    # Without this, heterogeneous per-source metadata (esp. numeric fields) makes a
+    # later stage's writer crash when one rank batches docs from mixed sources
+    # (ArrowTypeError: str cannot be converted to int). See stable_metadata_adapter.
+    language: str = source_cfg.get("language", "")
     writer = ParquetWriter(
         output_folder=str(src_out),
         output_filename="${rank}.parquet",
         compression="snappy",
+        adapter=stable_metadata_adapter(
+            keep_keys=("source", "dataset", "language"),
+            defaults={"source": src_id, "dataset": hf_dataset, "language": language},
+        ),
     )
 
     executor = LocalPipelineExecutor(

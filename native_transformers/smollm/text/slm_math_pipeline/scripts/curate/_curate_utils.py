@@ -11,6 +11,43 @@ import os
 from pathlib import Path
 
 
+def stable_metadata_adapter(keep_keys=("source", "dataset", "language"), defaults=None):
+    """Return a datatrove ParquetWriter ``adapter`` that projects every document to a
+    FIXED, type-stable schema: ``{text:str, id:str, metadata:{<keep_keys>:str}}``.
+
+    Why this is needed: different HuggingFace sources ship wildly different metadata
+    (url/title/timestamp, and some carry NUMERIC fields). datatrove shards by file and
+    round-robins files across writer tasks, so a single writer rank routinely batches
+    documents from MULTIPLE sources. pyarrow then infers the ``metadata`` struct type
+    from that mixed batch and collides, e.g.:
+        ArrowTypeError: object of type <class 'str'> cannot be converted to int
+    (a field that was int in one source's docs and str in another's), or a schema
+    mismatch when later batches introduce new keys. Forcing one uniform set of string
+    keys removes both failure modes. Values are coerced to str and missing keys default
+    to "" so the struct is identical for every document of every source.
+
+    The default keeps {source, dataset, language} — the only metadata the curation
+    chain actually reads downstream (stage 03 routes on ``metadata['language']``); the
+    noisy per-source fields (url, title, …) are dropped. Pass ``defaults`` to seed keys
+    the raw source lacks (e.g. ``{"source": src_id, "language": "vi"}`` at materialize).
+    """
+    defaults = defaults or {}
+
+    def _adapter(self, document):  # datatrove binds this as a method -> (self, document)
+        meta = document.metadata or {}
+        out = {}
+        for k in keep_keys:
+            v = meta.get(k, defaults.get(k, ""))
+            out[k] = "" if v is None else str(v)
+        return {
+            "text": document.text or "",
+            "id": str(document.id) if document.id is not None else "",
+            "metadata": out,
+        }
+
+    return _adapter
+
+
 def _is_readable_parquet(path: Path) -> bool:
     """True iff ``path`` is a structurally valid parquet file (footer present)."""
     try:

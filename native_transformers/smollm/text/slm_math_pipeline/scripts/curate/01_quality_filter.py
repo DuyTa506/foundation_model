@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import prune_empty_parquet
+from _curate_utils import prune_empty_parquet, stable_metadata_adapter
 
 
 def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
@@ -91,10 +91,17 @@ def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True),
             *filters,
+            # Re-normalize metadata to the uniform {source,dataset,language} schema.
+            # This makes stage 01 tolerant of raw that was materialized BEFORE the
+            # stage-00 normalization fix (heterogeneous per-source metadata) without
+            # re-running materialize: even if a writer rank batches docs from mixed
+            # sources, the projected schema is identical -> no ArrowTypeError.
             ParquetWriter(
                 output_folder=output_dir,
                 output_filename="${rank}.parquet",
                 compression="snappy",
+                adapter=stable_metadata_adapter(
+                    keep_keys=("source", "dataset", "language")),
             ),
         ],
         tasks=workers,
