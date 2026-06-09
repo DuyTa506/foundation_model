@@ -28,7 +28,11 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import run_with_hf_retry, stable_metadata_adapter
+from _curate_utils import (
+    run_with_hf_retry,
+    stable_metadata_adapter,
+    stable_reader_adapter,
+)
 
 
 def _check_datatrove():
@@ -79,6 +83,17 @@ def materialize_source(
     subset: str | None = source_cfg.get("subset")
     split: str = source_cfg.get("split", "train")
 
+    # One uniform metadata schema {source,dataset,language} for EVERY document, built at
+    # READ time. This both (a) drops noisy heterogeneous per-source fields that crash the
+    # writer at scale, and (b) bypasses datatrove's default reader adapter, whose
+    # `metadata | data` fold raises `TypeError: str | dict` on sources like open-web-math
+    # that ship a top-level string `metadata` column (older datatrove has no type guard).
+    language: str = source_cfg.get("language", "")
+    reader_adapter = stable_reader_adapter(
+        keep_keys=("source", "dataset", "language"),
+        defaults={"source": src_id, "dataset": hf_dataset, "language": language},
+    )
+
     # ── Source selection: prefer local streamed parquet over re-downloading from HF ──
     streamed_src = (streamed_root / src_id) if streamed_root else None
     uses_hf_api = False  # True when reading directly from HF (load_dataset hits the API)
@@ -91,6 +106,7 @@ def materialize_source(
             data_folder=str(streamed_src),
             glob_pattern="*.parquet",
             text_key="text",
+            adapter=reader_adapter,
             doc_progress=True,
             limit=max_rows if max_rows else -1,
         )
@@ -115,23 +131,19 @@ def materialize_source(
             dataset=hf_dataset,
             dataset_options=dataset_options,
             text_key=text_field,
+            adapter=reader_adapter,
             doc_progress=True,
             limit=max_rows if max_rows else -1,
         )
 
-    # Normalize EVERY source to one uniform metadata schema {source,dataset,language}.
-    # Without this, heterogeneous per-source metadata (esp. numeric fields) makes a
-    # later stage's writer crash when one rank batches docs from mixed sources
-    # (ArrowTypeError: str cannot be converted to int). See stable_metadata_adapter.
-    language: str = source_cfg.get("language", "")
+    # The reader adapter already produced the uniform {source,dataset,language} schema;
+    # the writer adapter re-projects defensively so the on-disk struct is identical for
+    # every source even if a row slipped through with extra keys.
     writer = ParquetWriter(
         output_folder=str(src_out),
         output_filename="${rank}.parquet",
         compression="snappy",
-        adapter=stable_metadata_adapter(
-            keep_keys=("source", "dataset", "language"),
-            defaults={"source": src_id, "dataset": hf_dataset, "language": language},
-        ),
+        adapter=stable_metadata_adapter(keep_keys=("source", "dataset", "language")),
     )
 
     # When reading straight from HF, EVERY task calls load_dataset and hits HF's

@@ -43,6 +43,56 @@ def run_with_hf_retry(executor, max_retries: int = 8, base_delay: float = 10.0):
             time.sleep(delay)
 
 
+def stable_reader_adapter(keep_keys=("source", "dataset", "language"), defaults=None):
+    """Return a datatrove **Reader** ``adapter`` (signature ``(self, data, path, id_in_file)``)
+    that builds a Document with a FIXED, type-stable metadata schema directly at READ time.
+
+    Why a *reader* adapter (not just the writer one): datatrove's default reader adapter
+    does ``data.pop("metadata", {}) | data`` to fold leftover columns into metadata. Some
+    HF sources (e.g. ``open-web-math``) ship a top-level column literally named
+    ``metadata`` whose value is a JSON **string**, so on older datatrove versions that do
+    NOT guard the type, ``str | dict`` raises::
+
+        TypeError: unsupported operand type(s) for |: 'str' and 'dict'
+
+    This blows up inside the reader, BEFORE our writer ``stable_metadata_adapter`` ever
+    runs, so the writer fix alone can't catch it. Supplying our own reader adapter means
+    we never touch ``_default_adapter`` at all — version-proof — and we emit the same
+    uniform ``{source,dataset,language}`` string schema the rest of the chain expects.
+
+    Values are pulled from the raw row first (top-level key, then a nested ``metadata``
+    dict if present), else from ``defaults`` (e.g. ``{"source": src_id, ...}``), coerced
+    to ``str``; missing keys become ``""`` so every document of every source is identical.
+    """
+    defaults = defaults or {}
+
+    def _adapter(self, data, path, id_in_file):  # bound via MethodType -> self is the reader
+        # A source may carry a 'metadata' column that is a str/JSON/dict — never assume dict.
+        nested = data.get("metadata")
+        if isinstance(nested, str):
+            import json
+            try:
+                nested = json.loads(nested)
+            except (json.JSONDecodeError, ValueError):
+                nested = {}
+        if not isinstance(nested, dict):
+            nested = {}
+        out = {}
+        for k in keep_keys:
+            v = data.get(k, nested.get(k, defaults.get(k, "")))
+            out[k] = "" if v is None else str(v)
+        text = data.get(self.text_key, "")
+        doc_id = data.get(self.id_key)
+        return {
+            "text": text or "",
+            "id": str(doc_id) if doc_id is not None else f"{path}/{id_in_file}",
+            "media": [],
+            "metadata": out,
+        }
+
+    return _adapter
+
+
 def stable_metadata_adapter(keep_keys=("source", "dataset", "language"), defaults=None):
     """Return a datatrove ParquetWriter ``adapter`` that projects every document to a
     FIXED, type-stable schema: ``{text:str, id:str, metadata:{<keep_keys>:str}}``.
