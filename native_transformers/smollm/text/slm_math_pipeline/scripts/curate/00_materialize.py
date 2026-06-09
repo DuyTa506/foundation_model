@@ -85,10 +85,10 @@ def materialize_source(
         print(f"[materialize] {src_id} <- streamed parquet {streamed_src}  "
               f"(no HF re-download)")
         reader = ParquetReader(
-            input_folder=str(streamed_src),
+            data_folder=str(streamed_src),
             glob_pattern="*.parquet",
             text_key="text",
-            progress=True,
+            doc_progress=True,
             limit=max_rows if max_rows else -1,
         )
     else:
@@ -111,13 +111,13 @@ def materialize_source(
             dataset=hf_dataset,
             dataset_options=dataset_options,
             text_key=text_field,
-            progress=True,
+            doc_progress=True,
             limit=max_rows if max_rows else -1,
         )
 
     writer = ParquetWriter(
         output_folder=str(src_out),
-        output_filename="${rank:04d}.parquet",
+        output_filename="${rank}.parquet",
         compression="snappy",
     )
 

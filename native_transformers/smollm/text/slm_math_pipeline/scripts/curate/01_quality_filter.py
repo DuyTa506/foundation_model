@@ -22,6 +22,8 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
 
 def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
     from datatrove.executor import LocalPipelineExecutor
@@ -65,31 +67,33 @@ def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
             max_ellipsis_lines_ratio=qf_cfg.get("ellipsis_line_ratio_max", 0.30),
             max_non_alpha_words_ratio=1.0 - qf_cfg.get("alpha_ratio_min", 0.65),
         ),
-        GopherRepetitionFilter(
-            max_top_ngram_character_fraction=None,
-        ),
+        GopherRepetitionFilter(),
         C4QualityFilter(
             filter_no_terminal_punct=qf_cfg.get("end_with_punctuation", True),
         ),
         FineWebQualityFilter(),
         # VI-specific: requires some diacritics (catches garbled VI docs)
         LambdaFilter(
-            filter_func=lambda doc: (
+            filter_function=lambda doc: (
                 # Only apply to docs tagged vi; skip if lang unknown yet
                 True if doc.metadata.get("language") not in ("vi", "vie_Latn")
                 else _vi_diacritic_check(doc)
             ),
-            name="vi_diacritic_check",
         ),
     ]
 
     return LocalPipelineExecutor(
         pipeline=[
-            ParquetReader(input_folder=input_dir, progress=True),
+            # glob_pattern restricts to parquet only; without it datatrove reads
+            # ALL files recursively, including the logs/ sidecar each stage writes
+            # inside its own output dir (0-byte completion markers, executor.json),
+            # and tries to parse them as parquet -> "Parquet file size is 0 bytes".
+            ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                          doc_progress=True),
             *filters,
             ParquetWriter(
                 output_folder=output_dir,
-                output_filename="${rank:04d}.parquet",
+                output_filename="${rank}.parquet",
                 compression="snappy",
             ),
         ],
@@ -111,6 +115,7 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     executor = build_pipeline(cfg, args.input_dir, args.output_dir, args.workers)
     executor.run()

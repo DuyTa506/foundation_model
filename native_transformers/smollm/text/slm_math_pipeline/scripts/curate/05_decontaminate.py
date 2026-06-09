@@ -25,6 +25,8 @@ from typing import FrozenSet
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
@@ -102,11 +104,12 @@ def decontaminate(
 
     executor = LocalPipelineExecutor(
         pipeline=[
-            ParquetReader(input_folder=input_dir, progress=True),
-            LambdaFilter(filter_func=_is_clean, name="decontamination"),
+            ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                          doc_progress=True),
+            LambdaFilter(filter_function=_is_clean),
             ParquetWriter(
                 output_folder=output_dir,
-                output_filename="${rank:04d}.parquet",
+                output_filename="${rank}.parquet",
                 compression="snappy",
             ),
         ],
@@ -129,6 +132,7 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     decontaminate(cfg, args.input_dir, args.output_dir, args.workers)
     print(f"[ok] decontamination done -> {args.output_dir}")

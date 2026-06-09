@@ -1,0 +1,17 @@
+# Generated artifacts — regenerable by the pipeline, never commit (can be many GB)
+outputs/
+/tmp/
+*.ds
+*.ds.index
+*.ds.metadata
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Local caches
+.cache/
+hf_cache*/
+*_hf_cache/

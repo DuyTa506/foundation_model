@@ -24,6 +24,8 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
 
 def _load_langid_model(backend: str, model_name: str):
     """Load language identification model; falls back gracefully."""
@@ -90,25 +92,39 @@ def build_pipeline(
 
     # datatrove's built-in LanguageFilter uses fastText under the hood
     # with the same HF model; configure it directly.
+    # datatrove backend choices are exactly {"ft176", "glotlid"}. glotlid emits
+    # script-tagged codes (eng_Latn/vie_Latn) matching keep_languages; ft176 emits
+    # bare ISO-639-1 (en/vi). Pick the one matching the configured keep_languages.
+    dt_backend = "glotlid" if backend == "glotlid" else "ft176"
     try:
         lang_filter = LanguageFilter(
             languages=keep_languages,
             language_threshold=min_confidence,
-            backend="fasttext",
+            backend=dt_backend,
         )
         use_builtin = True
     except Exception:
         use_builtin = False
-        model, actual_backend = _load_langid_model(backend, model_name)
 
     if use_builtin:
         filters = [lang_filter]
     else:
-        # Manual fallback
+        # Manual fallback. Load the fastText model lazily, once per worker process:
+        # datatrove pickles this closure to its workers and a loaded
+        # `fasttext_pybind.fasttext` object is not picklable. Capture only the
+        # (string) backend/model_name and cache the model per process.
+        _model_cache: dict = {}
+
+        def _get_model():
+            if not _model_cache:
+                _model_cache["m"], _ = _load_langid_model(backend, model_name)
+            return _model_cache["m"]
+
         def _lang_filter_func(doc) -> bool:
             text = doc.text or ""
             if not text.strip():
                 return False
+            model = _get_model()
             if model is not None:
                 try:
                     labels, scores = model.predict(text.replace("\n", " ")[:512], k=1)
@@ -128,15 +144,16 @@ def build_pipeline(
             doc.metadata["language_score"] = conf
             return lang in keep_languages and conf >= min_confidence
 
-        filters = [LambdaFilter(filter_func=_lang_filter_func, name="language_id")]
+        filters = [LambdaFilter(filter_function=_lang_filter_func)]
 
     return LocalPipelineExecutor(
         pipeline=[
-            ParquetReader(input_folder=input_dir, progress=True),
+            ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                          doc_progress=True),
             *filters,
             ParquetWriter(
                 output_folder=output_dir,
-                output_filename="${rank:04d}.parquet",
+                output_filename="${rank}.parquet",
                 compression="snappy",
             ),
         ],
@@ -158,6 +175,7 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     executor = build_pipeline(cfg, args.input_dir, args.output_dir, args.workers)
     executor.run()

@@ -18,6 +18,8 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
 # PII patterns
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -50,14 +52,17 @@ def run_pii(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
         # Use datatrove's built-in PIIFormatter if available
         executor = LocalPipelineExecutor(
             pipeline=[
-                ParquetReader(input_folder=input_dir, progress=True),
+                ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                              doc_progress=True),
                 PIIFormatter(
                     remove_emails=pii_cfg.get("redact_email", True),
                     remove_ips=pii_cfg.get("redact_ip", True),
+                    email_replacement=replacement,
+                    ip_replacement=replacement,
                 ),
                 ParquetWriter(
                     output_folder=output_dir,
-                    output_filename="${rank:04d}.parquet",
+                    output_filename="${rank}.parquet",
                     compression="snappy",
                 ),
             ],
@@ -78,11 +83,12 @@ def run_pii(cfg: dict, input_dir: str, output_dir: str, workers: int) -> None:
 
         executor = LocalPipelineExecutor(
             pipeline=[
-                ParquetReader(input_folder=input_dir, progress=True),
-                LambdaFilter(filter_func=_redact, name="pii_redact"),
+                ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                              doc_progress=True),
+                LambdaFilter(filter_function=_redact),
                 ParquetWriter(
                     output_folder=output_dir,
-                    output_filename="${rank:04d}.parquet",
+                    output_filename="${rank}.parquet",
                     compression="snappy",
                 ),
             ],
@@ -106,6 +112,7 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     run_pii(cfg, args.input_dir, args.output_dir, args.workers)
     print(f"[ok] PII redaction done -> {args.output_dir}")

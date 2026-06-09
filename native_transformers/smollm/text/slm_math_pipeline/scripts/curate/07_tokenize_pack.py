@@ -28,6 +28,38 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
+
+def _resolve_tokenizer_file(tokenizer_path: str) -> str:
+    """datatrove's load_tokenizer() does ``Tokenizer.from_file(path)`` only when
+    ``os.path.isfile(path)`` is true; otherwise it falls through to
+    ``Tokenizer.from_pretrained(path)`` which treats the string as a HuggingFace
+    Hub repo id and raises HFValidationError for a local dir like
+    ``outputs/tokenizer``. So when given a directory, hand datatrove the concrete
+    ``tokenizer.json`` file inside it."""
+    p = Path(tokenizer_path)
+    if p.is_dir():
+        tok_json = p / "tokenizer.json"
+        if not tok_json.is_file():
+            raise FileNotFoundError(
+                f"{tokenizer_path} is a directory but has no tokenizer.json; "
+                f"datatrove's DocumentTokenizer needs a tokenizer.json file path")
+        return str(tok_json)
+    return tokenizer_path
+
+
+def _resolve_eos_token(tokenizer_path: str) -> str:
+    """The EOS string DocumentTokenizer inserts between docs must actually exist
+    in the tokenizer vocab, so read it from the tokenizer rather than hardcoding."""
+    from transformers import AutoTokenizer
+    tk = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
+    eos = tk.eos_token
+    if not eos:
+        raise ValueError(
+            f"tokenizer at {tokenizer_path} has no eos_token; set one before packing")
+    return eos
+
 
 def tokenize_and_pack(
     input_dir: str,
@@ -42,16 +74,24 @@ def tokenize_and_pack(
     from datatrove.pipeline.readers import ParquetReader
     from datatrove.pipeline.tokens import DocumentTokenizer
 
+    eos_token = _resolve_eos_token(tokenizer_path)
+    tokenizer_file = _resolve_tokenizer_file(tokenizer_path)
+    print(f"[tokenize] eos_token={eos_token!r} (from tokenizer)")
+    print(f"[tokenize] tokenizer_file={tokenizer_file}")
+
     executor = LocalPipelineExecutor(
         pipeline=[
-            ParquetReader(input_folder=input_dir, progress=True, shuffle_files=shuffle),
+            ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                          doc_progress=True, shuffle_files=shuffle),
             DocumentTokenizer(
                 output_folder=output_dir,
-                tokenizer_name_or_path=tokenizer_path,
-                eos_token="<eos>",        # EOS between documents for packing
+                tokenizer_name_or_path=tokenizer_file,
+                local_working_dir=str(Path(output_dir) / "_scratch"),
+                eos_token=eos_token,      # EOS between documents for packing
                 max_tokens_per_file=max_tokens_per_file,
-                shuffle=shuffle,
-                # DocumentTokenizer packs + chunks to max_tokens in the writer
+                shuffle_documents=shuffle,
+                # DocumentTokenizer streams token .ds shards; the pretrainer's
+                # PackedTokenDataset chunks them into max_seq_length blocks.
             ),
         ],
         tasks=workers,
@@ -86,6 +126,7 @@ def main() -> None:
     shuffle: bool = tok_cfg.get("shuffle", True)
     tokenizer_path: str = args.tokenizer_path or tok_cfg.get("tokenizer_path", "outputs/tokenizer")
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
     print(f"[tokenize] max_seq_length={max_seq_length}  max_tokens_per_file={max_tokens_per_file:,}")

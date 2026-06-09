@@ -37,6 +37,8 @@ from pathlib import Path
 
 import yaml
 
+from _curate_utils import prune_empty_parquet
+
 
 def _train_vi_fasttext_classifier(
     hq_vi_dir: Path,
@@ -125,15 +127,32 @@ def classify_and_filter(
     from datatrove.pipeline.readers import ParquetReader
     from datatrove.pipeline.writers import ParquetWriter
 
-    try:
-        import fasttext
+    # IMPORTANT: do NOT load the fastText models here. datatrove's
+    # LocalPipelineExecutor pickles the whole pipeline (incl. this LambdaFilter's
+    # closure) to dispatch it to worker processes, and a loaded
+    # `fasttext_pybind.fasttext` object is NOT picklable
+    # (TypeError: cannot pickle 'fasttext_pybind.fasttext' object). So capture only
+    # the (string) paths and load each model lazily, once per worker process, into
+    # a per-process cache. The empty dict pickles fine; the model never crosses the
+    # process boundary.
+    _model_cache: dict = {}
 
-        en_model = fasttext.load_model(en_classifier_path) if en_classifier_path else None
-        vi_model = fasttext.load_model(vi_classifier_path) if vi_classifier_path else None
-    except Exception as e:
-        print(f"[warn] could not load classifier(s): {e}; falling back to heuristics")
-        en_model = None
-        vi_model = None
+    def _get_models():
+        if not _model_cache:
+            try:
+                import fasttext
+
+                _model_cache["en"] = (
+                    fasttext.load_model(en_classifier_path) if en_classifier_path else None
+                )
+                _model_cache["vi"] = (
+                    fasttext.load_model(vi_classifier_path) if vi_classifier_path else None
+                )
+            except Exception as e:
+                print(f"[warn] could not load classifier(s): {e}; falling back to heuristics")
+                _model_cache["en"] = None
+                _model_cache["vi"] = None
+        return _model_cache["en"], _model_cache["vi"]
 
     def _classify(doc) -> bool:
         text: str = doc.text or ""
@@ -142,6 +161,7 @@ def classify_and_filter(
         lang = doc.metadata.get("language", "")
         clean = text.replace("\n", " ")[:512]
 
+        en_model, vi_model = _get_models()
         model = None
         if "eng" in lang or lang == "en":
             model = en_model
@@ -164,11 +184,12 @@ def classify_and_filter(
 
     executor = LocalPipelineExecutor(
         pipeline=[
-            ParquetReader(input_folder=input_dir, progress=True),
-            LambdaFilter(filter_func=_classify, name="ultraclean"),
+            ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
+                          doc_progress=True),
+            LambdaFilter(filter_function=_classify),
             ParquetWriter(
                 output_folder=output_dir,
-                output_filename="${rank:04d}.parquet",
+                output_filename="${rank}.parquet",
                 compression="snappy",
             ),
         ],
@@ -205,9 +226,13 @@ def main() -> None:
     # ── EN classifier ────────────────────────────────────────────────────────
     en_classifier_path: str | None = None
     en_hf_id: str = uc_cfg.get("en", {}).get("classifier_hf_id", "openbmb/Ultra-FineWeb-classifier")
+    # The released repo stores the fastText classifiers under classifiers/, NOT
+    # a top-level model.bin (that name 404s). EN = ultra_fineweb_en.bin.
+    en_filename: str = uc_cfg.get("en", {}).get("classifier_filename",
+                                                "classifiers/ultra_fineweb_en.bin")
     try:
         from huggingface_hub import hf_hub_download
-        en_classifier_path = hf_hub_download(repo_id=en_hf_id, filename="model.bin")
+        en_classifier_path = hf_hub_download(repo_id=en_hf_id, filename=en_filename)
         print(f"[ultraclean] loaded EN classifier: {en_classifier_path}")
     except Exception as e:
         print(f"[warn] could not load EN classifier ({e}); skipping EN classification")
@@ -231,6 +256,7 @@ def main() -> None:
             )
             vi_classifier_path = str(vi_out)
 
+    prune_empty_parquet(args.input_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     classify_and_filter(
         input_dir=args.input_dir,

@@ -10,6 +10,8 @@ peft
 
 # Data curation (datatrove replaces the broken filter/dedup/prepare scripts)
 datatrove[processing]          # streaming, sharded, restartable curation pipeline
+spacy                          # word tokenizer backing datatrove's Gopher/quality filters
+                               # (NOT pulled by datatrove[processing]; stage 01 ImportErrors without it)
 fasttext                       # language ID + UltraClean quality classifier
 huggingface_hub                # download GlotLID / Ultra-FineWeb-classifier
 pyarrow==20.0.0
