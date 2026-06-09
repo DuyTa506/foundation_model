@@ -121,7 +121,11 @@ HF_TOKEN=hf_xxx python scripts/download_datasets.py --cache_dir /data/hf_cache
 python scripts/download_datasets.py --dry_run  # preview only
 
 # Run curation steps 00–07 in order
-python scripts/curate/00_materialize.py --config configs/curation_pipeline.yaml --output_dir outputs/curated/raw
+# Pass --cache_dir so 00_materialize reuses already-downloaded data instead of re-downloading:
+#   1. streamed parquet at <cache_dir>/streamed/  (new fraction-aware download)  → read directly
+#   2. else existing HF arrow cache under <cache_dir> (old full download)        → reused, no re-download
+#   3. else                                                                      → download from HF
+python scripts/curate/00_materialize.py --config configs/curation_pipeline.yaml --cache_dir /data/hf_cache --output_dir outputs/curated/raw
 python scripts/curate/01_quality_filter.py --config configs/curation_pipeline.yaml
 python scripts/curate/02_language_id.py
 python scripts/curate/03_ultraclean_filter.py

@@ -43,8 +43,17 @@ def materialize_source(
     output_dir: Path,
     max_rows: int | None,
     num_workers: int,
+    streamed_root: Path | None = None,
+    cache_dir: Path | None = None,
 ) -> int:
-    """Stream one HF source and write sharded parquet files. Returns row count."""
+    """Materialize one source to sharded parquet. Returns row count.
+
+    Source-selection priority (so an old server with data already on disk keeps
+    its old behavior, and only a fresh machine pulls anything new):
+      1. Pre-downloaded streamed parquet at <streamed_root>/<source_id>/ — read directly.
+      2. Existing HF arrow cache under --cache_dir — reused by load_dataset (no re-download).
+      3. Neither present → download from HuggingFace.
+    """
     from datatrove.executor import LocalPipelineExecutor
     from datatrove.pipeline.readers import HuggingFaceDatasetReader, ParquetReader
     from datatrove.pipeline.writers import ParquetWriter
@@ -68,17 +77,41 @@ def materialize_source(
     subset: str | None = source_cfg.get("subset")
     split: str = source_cfg.get("split", "train")
 
-    print(f"[materialize] {src_id} <- {hf_dataset} subset={subset} split={split} "
-          f"text_field={text_field}")
-
-    reader = HuggingFaceDatasetReader(
-        dataset=hf_dataset,
-        dataset_options={"name": subset} if subset else {},
-        split=split,
-        text_key=text_field,
-        progress=True,
-        limit=max_rows,
-    )
+    # ── Source selection: prefer local streamed parquet over re-downloading from HF ──
+    streamed_src = (streamed_root / src_id) if streamed_root else None
+    if streamed_src and (streamed_src / ".done").exists():
+        # download_datasets.py already pulled the correct fraction and normalized
+        # the text column to "text". Read it directly — no network, no big arrow.
+        print(f"[materialize] {src_id} <- streamed parquet {streamed_src}  "
+              f"(no HF re-download)")
+        reader = ParquetReader(
+            input_folder=str(streamed_src),
+            glob_pattern="*.parquet",
+            text_key="text",
+            progress=True,
+            limit=max_rows if max_rows else -1,
+        )
+    else:
+        if streamed_root:
+            print(f"[materialize] {src_id}: no streamed cache at {streamed_src}, "
+                  f"falling back to HF (reuses existing arrow cache if present)")
+        print(f"[materialize] {src_id} <- {hf_dataset} subset={subset} split={split} "
+              f"text_field={text_field}")
+        # Pass cache_dir so load_dataset reuses an already-downloaded arrow cache
+        # (the "old server" case) instead of re-downloading.
+        dataset_options: dict = {}
+        if subset:
+            dataset_options["name"] = subset
+        if cache_dir:
+            dataset_options["cache_dir"] = str(cache_dir)
+        reader = HuggingFaceDatasetReader(
+            dataset=hf_dataset,
+            dataset_options=dataset_options,
+            split=split,
+            text_key=text_field,
+            progress=True,
+            limit=max_rows,
+        )
 
     writer = ParquetWriter(
         output_folder=str(src_out),
@@ -95,15 +128,9 @@ def materialize_source(
     )
     executor.run()
 
-    # Count rows
-    n = sum(
-        1
-        for p in src_out.rglob("*.parquet")
-        for _ in __import__("pyarrow.parquet", fromlist=["read_table"])
-        .read_table(str(p), columns=[text_field[:1]])
-        .to_pydict()
-        .values()
-    )
+    # Count rows from parquet metadata (cheap — no full read)
+    import pyarrow.parquet as pq
+    n = sum(pq.read_metadata(str(p)).num_rows for p in src_out.rglob("*.parquet"))
     sentinel.write_text(json.dumps({"source": src_id, "rows": n}))
     print(f"[ok] {src_id}: {n:,} rows -> {src_out}")
     return n
@@ -117,6 +144,12 @@ def main() -> None:
                         help="Cap rows per source (useful for debugging).")
     parser.add_argument("--source_ids", nargs="*",
                         help="Only materialize these source IDs (default: all).")
+    parser.add_argument("--cache_dir", default=None,
+                        help="HF cache dir used by download_datasets.py. Streamed parquet "
+                             "is read from <cache_dir>/streamed/ to avoid HF re-download.")
+    parser.add_argument("--streamed_dir", default=None,
+                        help="Explicit dir of pre-downloaded streamed parquet shards "
+                             "(overrides <cache_dir>/streamed).")
     parser.add_argument("--workers", type=int, default=max(1, os.cpu_count() - 2))
     args = parser.parse_args()
 
@@ -135,9 +168,22 @@ def main() -> None:
     enabled_sources = [s for s in sources if s.get("enabled", True) and s.get("hf_dataset")]
     print(f"[materialize] {len(enabled_sources)} sources to materialize")
 
+    # Resolve where pre-downloaded streamed parquet lives (from download_datasets.py)
+    streamed_root: Path | None = None
+    if args.streamed_dir:
+        streamed_root = Path(args.streamed_dir)
+    elif args.cache_dir:
+        streamed_root = Path(args.cache_dir) / "streamed"
+    if streamed_root:
+        status = "found" if streamed_root.exists() else "not present (will stream from HF)"
+        print(f"[materialize] streamed cache: {streamed_root}  [{status}]")
+
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
+
     total = 0
     for src in enabled_sources:
-        n = materialize_source(src, output_dir, args.max_rows_per_source, args.workers)
+        n = materialize_source(src, output_dir, args.max_rows_per_source,
+                               args.workers, streamed_root, cache_dir)
         if n > 0:
             total += n
 

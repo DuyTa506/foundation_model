@@ -71,15 +71,30 @@ pip install -r requirements.txt
 Pre-download all HuggingFace sources before running curation or tokenizer training.
 This avoids streaming failures on slow or interrupted connections.
 
-```bash
-# --- Pretrain datasets (~212 GB total with split slicing) ---
+> **Fraction-aware streaming download.** A sliced split like `train[:5%]` with
+> `load_dataset(streaming=False)` downloads the **entire** dataset, then slices —
+> peS2o `train[:5%]` pulls all 308 GB, and summed across sources the cache balloons
+> to ~1.2 TB. `download_datasets.py` instead **streams** each source and writes only
+> the needed fraction as parquet shards under `<cache_dir>/streamed/<source_id>/`.
+> A `.done` marker makes re-runs idempotent (override with `--force`). Actual
+> footprint ≈ the dry-run estimate (~212 GB), not 1.2 TB.
+>
+> **Already have a full cache from before?** Don't re-run this — see the note under
+> Stage 1; `00_materialize.py --cache_dir ...` reuses your existing arrow cache as-is.
 
-# Dry-run: see what will be downloaded + estimated sizes
+```bash
+# --- Pretrain datasets (~212 GB total, fraction-aware streaming) ---
+
+# Dry-run: per-source footprint (now reflects what's actually pulled)
 python scripts/download_datasets.py --dry_run
 
-# Download all pretrain sources
+# Download all pretrain sources → <cache_dir>/streamed/<source_id>/*.parquet
 HF_TOKEN=hf_xxx python scripts/download_datasets.py \
   --cache_dir /data/hf_cache
+
+# Re-running skips completed sources; --force re-pulls
+HF_TOKEN=hf_xxx python scripts/download_datasets.py \
+  --cache_dir /data/hf_cache --force
 
 # Download only specific sources
 python scripts/download_datasets.py \
@@ -136,9 +151,15 @@ Outputs to `output_dir` from config (default: `outputs/tokenizer/`):
 ### Stage 1 — Build dataset
 
 ```bash
-# 1a. Materialize real text from HuggingFace to disk
+# 1a. Materialize real text to parquet.
+#     --cache_dir lets it REUSE already-downloaded data (never re-downloads), in priority:
+#       1. <cache_dir>/streamed/<id>/  → new fraction-aware download, read directly
+#       2. existing HF arrow cache under <cache_dir> → old full download, reused as-is
+#       3. neither present → download from HuggingFace
+#     So an old server with a full cache keeps its old behavior; only a fresh box pulls anything.
 python scripts/curate/00_materialize.py \
   --config configs/curation_pipeline.yaml \
+  --cache_dir /data/hf_cache \
   --output_dir outputs/curated/raw
 
 # 1b. Heuristic quality filtering (Gopher + C4 + FineWeb)
