@@ -313,13 +313,21 @@ def main() -> None:
         from transformers import AutoModelForCausalLM
 
         # Load from the random-init checkpoint (NOT from HF hub; always local)
-        # HF Trainer manages mixed precision internally — always load model in float32.
-        # fp16/bf16 flags in TrainingArguments handle AMP; loading in fp16 directly
-        # causes grad scaler to fail ("Attempting to unscale FP16 gradients").
+        # dtype rules:
+        #   fp16 training  → load float32; grad scaler handles AMP (loading fp16 breaks scaler)
+        #   bf16 training  → load bfloat16 directly; no grad scaler, FA2 requires non-float32
+        #   everything else → float32 (safe default)
         attn_impl = cfg["model"].get("attn_implementation", "eager")
+        train_cfg_early = cfg.get("training", {})
+        if train_cfg_early.get("bf16", False):
+            load_dtype = torch.bfloat16
+        elif train_cfg_early.get("fp16", False):
+            load_dtype = torch.float32  # keep float32 so grad scaler works
+        else:
+            load_dtype = torch.float32
         model = AutoModelForCausalLM.from_pretrained(
             str(init_ckpt),
-            torch_dtype=torch.float32,
+            torch_dtype=load_dtype,
             local_files_only=True,  # never pull from hub
             attn_implementation=attn_impl,
         )
