@@ -1,60 +1,42 @@
-# Curated direct dependencies for the SLM pipeline.
+# Minimal direct dependencies for the SLM pipeline.
 #
-# Do not full-freeze transitive packages here: full `pip freeze` captures many
-# platform-specific CUDA/NVIDIA wheels and is brittle across machines. This file
-# pins the packages that define behavior/API compatibility and keeps scale
-# training/post-training/eval dependencies explicit.
+# Let uv resolve compatible transitive versions for the target server instead
+# of pinning stale local sub-dependencies. Target server observed:
+# NVIDIA driver/KMD 610.43.02, CUDA UMD 13.3, H200/Hopper.
+#
+# Keep lighteval separate in requirements-eval.txt because its current dev
+# snapshot pins numpy<2 and conflicts with the training/vLLM stack.
 
-# Core training stack for H200 / CUDA 13 driver stack.
-# Target server observed: NVIDIA driver/KMD 610.43.02, CUDA UMD 13.3.
-# vLLM 0.22.1 declares torch/torchaudio/torchvision 2.11.0/2.11.0/0.26.0.
-# It allows transformers>=4.56.0 except early 5.x releases through 5.5.0,
-# so use the latest compatible 5.x release.
-torch==2.11.0
-torchaudio==2.11.0
-torchvision==0.26.0
-transformers==5.10.2
-accelerate==1.13.0
-datasets==5.0.0
-safetensors==0.7.0
-tokenizers==0.21.4
-huggingface-hub==0.36.2
-
-# Scale training / post-training (current compatible PyPI releases)
-trl==0.29.0
-peft==0.18.1
-deepspeed==0.18.8
-bitsandbytes==0.49.2
-wandb==0.19.11
-tensorboard==2.19.0
-
-# Latest vLLM line verified from PyPI metadata; it requires Python >=3.10,<3.15.
-# H200 is Hopper / compute capability 9.0, supported by this CUDA stack.
+# H200 training / inference anchor. vLLM pulls its compatible torch/CUDA stack.
 vllm==0.22.1
 
-# Data curation (local)
-datatrove[processing]==0.9.0
-spacy==3.8.14
-fasttext-numpy2-wheel==0.9.2
-pyarrow==24.0.0
-pandas==2.3.3
-trafilatura==1.11.0
-justext==3.0.2
-inscriptis==2.7.1
-ftfy==6.3.1
+# Core training / HF stack
+transformers
+accelerate
+datasets
+safetensors
+tokenizers
+
+# Scale training / post-training
+trl
+peft
+deepspeed
+bitsandbytes
+wandb
+tensorboard
+
+# Data curation
+datatrove[processing]
+spacy
+fasttext-numpy2-wheel
+pyarrow
 
 # Tokenizer / math / utility stack
-numpy==2.2.6
-scipy==1.15.3
-scikit-learn==1.7.0
-sentencepiece==0.2.0
-sympy==1.14.0
-pyyaml==6.0.3
-tqdm==4.68.1
-requests==2.34.2
-regex==2026.5.9
-rich==15.0.0
-psutil==7.2.2
+numpy
+sentencepiece
+sympy
+pyyaml
+tqdm
 
 # Retained for compatibility with older scripts/fallback paths.
-langdetect==1.0.9
+langdetect
