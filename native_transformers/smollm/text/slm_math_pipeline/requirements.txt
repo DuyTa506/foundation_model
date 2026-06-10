@@ -11,11 +11,14 @@
 vllm==0.22.1
 
 # Core training / HF stack
-transformers
+# transformers 5.10.2 ships a new TokenizersBackend loader that is incompatible
+# with tokenizers 0.22.x (saved special tokens reload as a list, not a dict,
+# crashing PreTrainedTokenizerFast.from_pretrained). Pin the known-good pair.
+transformers==5.10.2
 accelerate
 datasets
 safetensors
-tokenizers
+tokenizers==0.21.4
 
 # Scale training / post-training
 trl
