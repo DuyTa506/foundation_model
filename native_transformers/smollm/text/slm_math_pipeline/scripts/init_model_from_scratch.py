@@ -132,6 +132,13 @@ def main() -> None:
         mlp_bias=model_cfg.get("mlp_bias", False),
         torch_dtype=model_cfg.get("torch_dtype", "bfloat16"),
     )
+    # Some transformers versions accept unknown LlamaConfig kwargs without
+    # exposing them as attributes. Keep these fields explicit so config.json and
+    # init_summary.json preserve the long-context RoPE settings from YAML.
+    if "rope_theta" in model_cfg:
+        config.rope_theta = model_cfg["rope_theta"]
+    if "rope_scaling" in model_cfg:
+        config.rope_scaling = model_cfg.get("rope_scaling")
 
     print(f"[init] building LlamaForCausalLM from config (NOT from_pretrained)")
     print(f"[init] hidden_size={config.hidden_size} layers={config.num_hidden_layers} "
@@ -196,7 +203,8 @@ def main() -> None:
         "num_attention_heads": config.num_attention_heads,
         "num_key_value_heads": config.num_key_value_heads,
         "head_dim": getattr(config, "head_dim", None),
-        "rope_theta": config.rope_theta,
+        "rope_theta": getattr(config, "rope_theta", model_cfg.get("rope_theta")),
+        "rope_scaling": getattr(config, "rope_scaling", model_cfg.get("rope_scaling")),
         "max_position_embeddings": config.max_position_embeddings,
     }
     with (output_dir / "init_summary.json").open("w", encoding="utf-8") as f:

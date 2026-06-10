@@ -1,44 +1,64 @@
-# Core training stack
-torch==2.7.0
-torchaudio==2.7.0
-torchvision==0.22.0
-transformers
-accelerate==1.7.0
-datasets==3.6.0
-trl>=0.15
-peft
+# Curated direct dependencies for the SLM pipeline.
+#
+# Do not full-freeze transitive packages here: full `pip freeze` captures many
+# platform-specific CUDA/NVIDIA wheels and is brittle across machines. This file
+# pins the packages that define behavior/API compatibility and keeps scale
+# training/post-training/eval dependencies explicit.
 
-# Data curation (datatrove replaces the broken filter/dedup/prepare scripts)
-datatrove[processing]==0.9.0   # streaming, sharded, restartable curation pipeline
-spacy                          # word tokenizer backing datatrove's Gopher/quality filters
-                               # (NOT pulled by datatrove[processing]; stage 01 ImportErrors without it)
-fasttext                       # language ID + UltraClean quality classifier
-huggingface_hub                # download GlotLID / Ultra-FineWeb-classifier
-pyarrow==20.0.0
+# Core training stack for H200 / CUDA 13 driver stack.
+# Target server observed: NVIDIA driver/KMD 610.43.02, CUDA UMD 13.3.
+# vLLM 0.22.1 declares torch/torchaudio/torchvision 2.11.0/2.11.0/0.26.0.
+# It allows transformers>=4.56.0 except early 5.x releases through 5.5.0,
+# so use the latest compatible 5.x release.
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
+transformers==5.10.2
+accelerate==1.13.0
+datasets==5.0.0
+safetensors==0.7.0
+tokenizers==0.21.4
+huggingface-hub==0.36.2
 
-# Tokenizer training (from scratch)
-tokenizers                     # byte-level BPE; exports HF-compatible tokenizer.json
+# Scale training / post-training (current compatible PyPI releases)
+trl==0.29.0
+peft==0.18.1
+deepspeed==0.18.8
+bitsandbytes==0.49.2
+wandb==0.19.11
+tensorboard==2.19.0
 
-# Math reward verification (GRPO)
-sympy                          # symbolic math equivalence for correctness reward
+# Latest vLLM line verified from PyPI metadata; it requires Python >=3.10,<3.15.
+# H200 is Hopper / compute capability 9.0, supported by this CUDA stack.
+vllm==0.22.1
 
-# Other utilities
-numpy==1.26.4
+# Data curation (local)
+datatrove[processing]==0.9.0
+spacy==3.8.14
+fasttext-numpy2-wheel==0.9.2
+pyarrow==24.0.0
+pandas==2.3.3
+trafilatura==1.11.0
+justext==3.0.2
+inscriptis==2.7.1
+ftfy==6.3.1
+nltk==3.9.4
+
+# Tokenizer / math / utility stack
+numpy==2.2.6
 scipy==1.15.3
 scikit-learn==1.7.0
 sentencepiece==0.2.0
-safetensors==0.5.3
-pyyaml
-tqdm
-wandb
-tensorboard                    # alternative to wandb; set report_to: tensorboard in config
-bitsandbytes
-deepspeed
+sympy==1.13.1
+pyyaml==6.0.3
+tqdm==4.68.1
+requests==2.34.2
+regex==2026.5.9
+rich==15.0.0
+psutil==7.2.2
 
 # Evaluation
 lighteval[extended_tasks,multilingual] @ git+https://github.com/huggingface/lighteval.git@2788496c3ef9973a24c7d8b87ee5b2cceb430872
-vllm==0.9.1
 
-# Removed: langdetect (replaced by fasttext + GlotLID in curate/02_language_id.py)
-# Retained for compatibility: the old scripts still import it as a fallback.
+# Retained for compatibility with older scripts/fallback paths.
 langdetect==1.0.9

@@ -18,7 +18,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -84,6 +86,7 @@ def main() -> None:
     total_tokens = 0
     shard_idx = 0
     docs_processed = 0
+    written_shards: list[Path] = []
 
     try:
         from tqdm import tqdm
@@ -92,9 +95,20 @@ def main() -> None:
         pbar = None
 
     def flush_shard(tokens: list[int], idx: int) -> None:
+        max_token_id = max(tokens) if tokens else 0
+        if max_token_id > np.iinfo(np.uint16).max:
+            raise ValueError(
+                f"token id {max_token_id} exceeds uint16; use a wider dtype before saving"
+            )
         arr = np.array(tokens, dtype=np.uint16)
         path = output_dir / f"shard_{idx:04d}.npy"
-        np.save(str(path), arr)
+        tmp_path = output_dir / f".{path.name}.tmp"
+        with tmp_path.open("wb") as f:
+            np.save(f, arr)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp_path.replace(path)
+        written_shards.append(path)
         print(f"  saved {path}  ({len(tokens):,} tokens)")
 
     for row in ds:
@@ -132,13 +146,61 @@ def main() -> None:
     print(f"\n[smoke_tokenize] done: {total_tokens:,} tokens, {docs_processed:,} docs, "
           f"{shard_idx} shards → {output_dir}")
 
-    # Quick sanity: verify one shard
-    shards = sorted(output_dir.glob("*.npy"))
-    if shards:
-        sample = np.load(str(shards[0]), mmap_mode="r")
+    # Explicitly verify only shards produced by this run, then write a manifest.
+    verified = []
+    for path in written_shards:
+        sample = np.load(str(path), mmap_mode="r")
+        if sample.dtype != np.uint16:
+            raise ValueError(f"{path} dtype={sample.dtype}, expected uint16")
+        if len(sample) < L + 1:
+            raise ValueError(f"{path} has {len(sample)} tokens, fewer than seq_len+1={L + 1}")
         n_examples = len(sample) // (L + 1)
-        print(f"[smoke_tokenize] shard[0]: {len(sample):,} tokens → {n_examples} examples "
-              f"of seq_len={L}")
+        verified.append({
+            "path": str(path),
+            "tokens": int(len(sample)),
+            "examples": int(n_examples),
+            "dtype": str(sample.dtype),
+        })
+        del sample
+
+    if not verified:
+        raise RuntimeError("smoke tokenization produced no usable shards")
+
+    print(f"[smoke_tokenize] verified {len(verified)} shard(s)")
+    first = verified[0]
+    print(f"[smoke_tokenize] shard[0]: {first['tokens']:,} tokens → "
+          f"{first['examples']} examples of seq_len={L}")
+
+    manifest = {
+        "source_id": args.source_id,
+        "hf_dataset": hf_dataset,
+        "split": split,
+        "text_field": text_field,
+        "tokenizer_path": args.tokenizer_path,
+        "seq_len": L,
+        "max_tokens_requested": args.max_tokens,
+        "total_tokens_observed": total_tokens,
+        "docs_processed": docs_processed,
+        "shard_size": args.shard_size,
+        "num_shards": len(verified),
+        "shards": verified,
+    }
+    manifest_path = output_dir / "manifest.json"
+    tmp_manifest_path = output_dir / ".manifest.json.tmp"
+    with tmp_manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    tmp_manifest_path.replace(manifest_path)
+    print(f"[smoke_tokenize] manifest: {manifest_path}")
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Some Python/native-extension combinations abort during interpreter shutdown
+    # after all shards have been written and verified. Exit here so the smoke
+    # script returns success only after explicit verification above.
+    os._exit(0)
 
 
 if __name__ == "__main__":

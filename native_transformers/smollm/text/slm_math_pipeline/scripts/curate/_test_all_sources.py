@@ -7,10 +7,11 @@ column, numeric extras) on real data BEFORE a full cluster run — cheaply, on a
 Why not just run 00_materialize.py here: the production splits are huge
 (`train[:20%]` of CulturaX etc.) and datatrove's HF reader defaults to
 streaming=False, so load_dataset would DOWNLOAD the whole slice. This harness forces
-streaming=True + a small `limit`, so only the first ~N rows are fetched per source. It
-builds the readers/writers with the SAME adapters 00_materialize uses, so it tests the
-real code path that matters (stable_reader_adapter / stable_metadata_adapter), not a
-mock. tasks=1 → sequential, no HF rate-limit risk.
+streaming=True + a small `limit`, so only the first ~N rows are fetched per source.
+It uses datasets.load_dataset directly because older datatrove versions can pass
+world_size=0 into streaming HF sharding. It still writes through datatrove's
+ParquetWriter with the SAME stable adapters 00_materialize uses, so it tests the
+schema path that matters.
 
 Usage:
     .venv/bin/python scripts/curate/_test_all_sources.py \
@@ -20,9 +21,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
+from collections import deque
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -31,8 +35,8 @@ from _curate_utils import stable_metadata_adapter, stable_reader_adapter  # noqa
 
 
 def stream_one(src: dict, output_dir: Path, limit: int) -> tuple[str, bool, str]:
-    from datatrove.executor import LocalPipelineExecutor
-    from datatrove.pipeline.readers import HuggingFaceDatasetReader
+    from datasets import load_dataset
+    from datatrove.data import Document
     from datatrove.pipeline.writers import ParquetWriter
 
     src_id = src["id"]
@@ -52,31 +56,36 @@ def stream_one(src: dict, output_dir: Path, limit: int) -> tuple[str, bool, str]
         dataset_options["name"] = subset
     if src.get("revision"):
         dataset_options["revision"] = src["revision"]
+    if os.environ.get("HF_TOKEN"):
+        dataset_options["token"] = os.environ["HF_TOKEN"]
 
-    reader = HuggingFaceDatasetReader(
-        dataset=hf_dataset,
-        dataset_options=dataset_options,
+    ds = load_dataset(
+        hf_dataset,
+        **dataset_options,
         streaming=True,  # lazy-fetch; only `limit` rows are pulled, no full-split download
-        text_key=text_field,
-        adapter=stable_reader_adapter(
-            keep_keys=("source", "dataset", "language"),
-            defaults={"source": src_id, "dataset": hf_dataset, "language": language},
-        ),
-        limit=limit,
-        doc_progress=False,
     )
     src_out = output_dir / src_id
     src_out.mkdir(parents=True, exist_ok=True)
+    reader_adapter = stable_reader_adapter(
+        keep_keys=("source", "dataset", "language"),
+        defaults={"source": src_id, "dataset": hf_dataset, "language": language},
+    )
+    adapter_self = SimpleNamespace(text_key=text_field, id_key="id")
+
+    def documents():
+        for i, row in enumerate(ds):
+            if i >= limit:
+                break
+            adapted = reader_adapter(adapter_self, dict(row), src_id, i)
+            yield Document(**adapted)
+
     writer = ParquetWriter(
         output_folder=str(src_out),
         output_filename="${rank}.parquet",
         compression="snappy",
         adapter=stable_metadata_adapter(keep_keys=("source", "dataset", "language")),
     )
-    LocalPipelineExecutor(
-        pipeline=[reader, writer], tasks=1, workers=1,
-        logging_dir=str(src_out / "logs"), skip_completed=False,
-    ).run()
+    deque(writer.run(documents(), rank=0, world_size=1), maxlen=0)
 
     import pyarrow.parquet as pq
     files = list(src_out.rglob("*.parquet"))
