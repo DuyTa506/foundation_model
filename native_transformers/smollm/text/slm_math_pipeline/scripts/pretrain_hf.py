@@ -405,7 +405,9 @@ def main() -> None:
                 hi = mid - 1
         model.to("cpu")
         torch.cuda.empty_cache()
-        micro_batch = best
+        # Apply 50% safety margin: FSDP adds fp32 master weights + optimizer states
+        # that the single-GPU probe doesn't account for.
+        micro_batch = max(1, best // 2)
         # Recompute grad_accum; round up to nearest int (slightly > target is fine)
         grad_accum = max(1, round(target_global_tokens / (micro_batch * num_gpus * max_seq_length)))
         actual_tokens = micro_batch * grad_accum * num_gpus * max_seq_length
