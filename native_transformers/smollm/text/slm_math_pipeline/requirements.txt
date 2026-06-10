@@ -9,7 +9,7 @@ trl>=0.15
 peft
 
 # Data curation (datatrove replaces the broken filter/dedup/prepare scripts)
-datatrove[processing]          # streaming, sharded, restartable curation pipeline
+datatrove[processing]==0.9.0   # streaming, sharded, restartable curation pipeline
 spacy                          # word tokenizer backing datatrove's Gopher/quality filters
                                # (NOT pulled by datatrove[processing]; stage 01 ImportErrors without it)
 fasttext                       # language ID + UltraClean quality classifier

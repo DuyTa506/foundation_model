@@ -23,6 +23,7 @@ pointing at the long-document input dir.
 from __future__ import annotations
 
 import argparse
+import inspect
 import os
 from pathlib import Path
 
@@ -79,20 +80,27 @@ def tokenize_and_pack(
     print(f"[tokenize] eos_token={eos_token!r} (from tokenizer)")
     print(f"[tokenize] tokenizer_file={tokenizer_file}")
 
+    tokenizer_kwargs = {
+        "output_folder": output_dir,
+        "tokenizer_name_or_path": tokenizer_file,
+        "local_working_dir": str(Path(output_dir) / "_scratch"),
+        "eos_token": eos_token,      # EOS between documents for packing
+        "max_tokens_per_file": max_tokens_per_file,
+    }
+    tokenizer_params = inspect.signature(DocumentTokenizer.__init__).parameters
+    if "shuffle_documents" in tokenizer_params:
+        tokenizer_kwargs["shuffle_documents"] = shuffle
+    elif shuffle:
+        print("[tokenize] installed datatrove DocumentTokenizer has no "
+              "shuffle_documents kwarg; only input files will be shuffled")
+
     executor = LocalPipelineExecutor(
         pipeline=[
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True, shuffle_files=shuffle),
-            DocumentTokenizer(
-                output_folder=output_dir,
-                tokenizer_name_or_path=tokenizer_file,
-                local_working_dir=str(Path(output_dir) / "_scratch"),
-                eos_token=eos_token,      # EOS between documents for packing
-                max_tokens_per_file=max_tokens_per_file,
-                shuffle_documents=shuffle,
-                # DocumentTokenizer streams token .ds shards; the pretrainer's
-                # PackedTokenDataset chunks them into max_seq_length blocks.
-            ),
+            # DocumentTokenizer streams token .ds shards; the pretrainer's
+            # PackedTokenDataset chunks them into max_seq_length blocks.
+            DocumentTokenizer(**tokenizer_kwargs),
         ],
         tasks=workers,
         workers=workers,
