@@ -73,6 +73,7 @@ training:
   bf16: true
   gradient_checkpointing: false  # H200 + 1B model + FA2: no OOM risk at seq=4096
   torch_compile: false           # set true for ~15% speedup; may conflict with FSDP on some builds
+  auto_batch_size: false         # set true to binary-search max micro_batch and recompute grad_accum
 
 # ── Parallelism (FSDP or DeepSpeed ZeRO-2 via accelerate) ───────────────────
 parallelism:

@@ -364,6 +364,40 @@ def main() -> None:
     stable_steps = total_steps - warmup_steps - decay_steps
     decay_half_life = sched_cfg.get("decay_half_life_steps", 5000)
 
+    # ── Auto batch size: maintain target global_batch_tokens ─────────────────
+    import torch, os as _os
+    num_gpus = int(_os.environ.get("WORLD_SIZE", 1))
+    micro_batch = train_cfg["micro_batch_size"]
+    grad_accum = train_cfg["gradient_accumulation_steps"]
+    target_global_tokens = micro_batch * grad_accum * num_gpus * max_seq_length
+
+    if train_cfg.get("auto_batch_size", False):
+        # Binary-search for the largest micro_batch that fits on this GPU,
+        # then recompute grad_accum to keep global_batch_tokens constant.
+        vocab_size = model.config.vocab_size
+        device = next(model.parameters()).device if next(model.parameters(), None) is not None else torch.device("cuda")
+        lo, hi, best = 1, micro_batch * 4, micro_batch
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            try:
+                dummy = torch.randint(0, vocab_size, (mid, max_seq_length), device="cuda")
+                with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                    out = model(input_ids=dummy, labels=dummy)
+                out.loss.backward()
+                model.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                best = mid
+                lo = mid + 1
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                hi = mid - 1
+        micro_batch = best
+        # Recompute grad_accum; round up to nearest int (slightly > target is fine)
+        grad_accum = max(1, round(target_global_tokens / (micro_batch * num_gpus * max_seq_length)))
+        actual_tokens = micro_batch * grad_accum * num_gpus * max_seq_length
+        print(f"[auto_batch] micro_batch={micro_batch}  grad_accum={grad_accum}  "
+              f"global_batch_tokens={actual_tokens:,}  (target={target_global_tokens:,})")
+
     # ── TrainingArguments ─────────────────────────────────────────────────────
     out_dir = cfg["run"]["output_dir"]
     ckpt_cfg = cfg.get("checkpointing", {})
@@ -391,8 +425,8 @@ def main() -> None:
         overwrite_output_dir=False,
         do_train=True,
         max_steps=total_steps,
-        per_device_train_batch_size=train_cfg["micro_batch_size"],
-        gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+        per_device_train_batch_size=micro_batch,
+        gradient_accumulation_steps=grad_accum,
         learning_rate=opt_cfg["peak_learning_rate"],
         adam_beta1=opt_cfg["adam_beta1"],
         adam_beta2=opt_cfg["adam_beta2"],
