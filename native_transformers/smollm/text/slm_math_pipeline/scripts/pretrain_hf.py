@@ -316,10 +316,12 @@ def main() -> None:
         # HF Trainer manages mixed precision internally — always load model in float32.
         # fp16/bf16 flags in TrainingArguments handle AMP; loading in fp16 directly
         # causes grad scaler to fail ("Attempting to unscale FP16 gradients").
+        attn_impl = cfg["model"].get("attn_implementation", "eager")
         model = AutoModelForCausalLM.from_pretrained(
             str(init_ckpt),
             torch_dtype=torch.float32,
             local_files_only=True,  # never pull from hub
+            attn_implementation=attn_impl,
         )
     else:
         raise FileNotFoundError(
@@ -404,9 +406,11 @@ def main() -> None:
         logging_steps=train_cfg.get("logging_steps", 10),
         save_steps=train_cfg.get("save_steps", 1000),
         save_total_limit=ckpt_cfg.get("save_total_limit", 5),
-        dataloader_num_workers=4,
+        optim="adamw_torch_fused",
+        dataloader_num_workers=data_cfg.get("dataloader_num_workers", 1),
         dataloader_pin_memory=True,
         gradient_checkpointing=train_cfg.get("gradient_checkpointing", False),
+        torch_compile=train_cfg.get("torch_compile", False),
         report_to=report_to,
         run_name=log_cfg.get("wandb_run_name") or cfg["run"].get("name"),
         seed=cfg["run"].get("seed", 42),
