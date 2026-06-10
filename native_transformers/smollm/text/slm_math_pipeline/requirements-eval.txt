@@ -1,0 +1,14 @@
+# Optional eval environment.
+#
+# Keep lighteval separate from the training requirements: the current
+# lighteval[extended_tasks] dev snapshot pins numpy<2 and nltk==3.9.1, which
+# conflicts with the H200/vLLM training stack in requirements.txt.
+#
+# Recommended:
+#   uv venv --python 3.11 .venv-eval
+#   source .venv-eval/bin/activate
+#   uv pip install -r requirements-eval.txt
+
+numpy<2
+nltk==3.9.1
+lighteval[extended_tasks,multilingual] @ git+https://github.com/huggingface/lighteval.git@2788496c3ef9973a24c7d8b87ee5b2cceb430872

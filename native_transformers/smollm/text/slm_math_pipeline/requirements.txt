@@ -56,8 +56,5 @@ regex==2026.5.9
 rich==15.0.0
 psutil==7.2.2
 
-# Evaluation
-lighteval[extended_tasks,multilingual] @ git+https://github.com/huggingface/lighteval.git@2788496c3ef9973a24c7d8b87ee5b2cceb430872
-
 # Retained for compatibility with older scripts/fallback paths.
 langdetect==1.0.9
