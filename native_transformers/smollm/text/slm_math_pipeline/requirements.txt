@@ -42,7 +42,6 @@ trafilatura==1.11.0
 justext==3.0.2
 inscriptis==2.7.1
 ftfy==6.3.1
-nltk==3.9.4
 
 # Tokenizer / math / utility stack
 numpy==2.2.6
