@@ -382,13 +382,17 @@ def main() -> None:
     if train_cfg.get("auto_batch_size", False):
         # Binary-search for the largest micro_batch that fits on this GPU,
         # then recompute grad_accum to keep global_batch_tokens constant.
+        # Model is still on CPU here (FSDP hasn't wrapped it yet); move it to
+        # the local rank's GPU for the probe, then back to CPU afterward.
+        local_rank = int(_os.environ.get("LOCAL_RANK", "0"))
+        probe_device = torch.device(f"cuda:{local_rank}")
+        model.to(probe_device)
         vocab_size = model.config.vocab_size
-        device = next(model.parameters()).device if next(model.parameters(), None) is not None else torch.device("cuda")
         lo, hi, best = 1, micro_batch * 4, micro_batch
         while lo <= hi:
             mid = (lo + hi) // 2
             try:
-                dummy = torch.randint(0, vocab_size, (mid, max_seq_length), device="cuda")
+                dummy = torch.randint(0, vocab_size, (mid, max_seq_length), device=probe_device)
                 with torch.amp.autocast("cuda", dtype=torch.bfloat16):
                     out = model(input_ids=dummy, labels=dummy)
                 out.loss.backward()
@@ -399,6 +403,8 @@ def main() -> None:
             except torch.cuda.OutOfMemoryError:
                 torch.cuda.empty_cache()
                 hi = mid - 1
+        model.to("cpu")
+        torch.cuda.empty_cache()
         micro_batch = best
         # Recompute grad_accum; round up to nearest int (slightly > target is fine)
         grad_accum = max(1, round(target_global_tokens / (micro_batch * num_gpus * max_seq_length)))
