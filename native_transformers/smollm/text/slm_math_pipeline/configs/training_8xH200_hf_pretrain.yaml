@@ -61,11 +61,11 @@ scheduler:
 
 # ── Batch / steps ─────────────────────────────────────────────────────────────
 training:
-  micro_batch_size: 16         # per GPU; FA2 frees ~50GB, safe to double from 8
-  gradient_accumulation_steps: 8
+  micro_batch_size: 8          # per GPU; logits spike (batch×seq×vocab) limits this even with FA2
+  gradient_accumulation_steps: 16
   # global_batch_tokens = micro_batch * grad_accum * num_gpus * seq_len
-  # 4 GPU: 16 *  8 * 4 * 4096 = 2,097,152 ≈ 2M tokens/step  ✓ (same as before)
-  # 8 GPU: 16 *  4 * 8 * 4096 = 2,097,152 ≈ 2M tokens/step  (grad_accum=4)
+  # 4 GPU:  8 * 16 * 4 * 4096 = 2,097,152 ≈ 2M tokens/step  ✓
+  # 8 GPU:  8 *  8 * 8 * 4096 = 2,097,152 ≈ 2M tokens/step  (grad_accum=8)
   total_steps: 50000           # ~100B tokens at 2M tok/step
   logging_steps: 10
   save_steps: 1000
