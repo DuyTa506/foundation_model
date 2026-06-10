@@ -25,7 +25,7 @@ hardware:
 model:
   config_path: configs/model_llama_1b_en_vi.yaml   # architecture config
   init_checkpoint: outputs/model_init              # from init_model_from_scratch.py
-  attn_implementation: flash_attention_2           # requires flash-attn (ships with vllm)
+  attn_implementation: sdpa                        # PyTorch built-in; flash_attention_2 needs separate install
   # rope_scaling: null for base training (4096 context)
 
 data:
