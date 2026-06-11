@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Project Overview
 
-An **~0.88B parameter** Vietnamese-first small language model (SLM) trained entirely from scratch — no pretrained checkpoint, all weights randomly initialized. Target domains: mathematics, science, and language. Architecture: Llama-like with GQA, custom EN+VI tokenizer (64K vocab), and a MiniCPM-inspired training recipe (WSD scheduler, UltraClean filtering, hybrid-thinking SFT, GRPO/RLVR).
+An **~1.0B parameter** (1.004B) Vietnamese-first small language model (SLM) trained entirely from scratch — no pretrained checkpoint, all weights randomly initialized. Target domains: mathematics, science, and language. Architecture: Llama-like, **32 layers**, GQA, **tied input/output embeddings**, decoupled `head_dim=128`, custom EN+VI tokenizer (64K vocab), and a MiniCPM-inspired training recipe (WSD scheduler, UltraClean filtering, hybrid-thinking SFT, GRPO/RLVR).
 
 ## Setup
 
@@ -74,7 +74,7 @@ After only 20 steps the tiny model outputs gibberish — that's expected. The go
 ### Step 4 — Scale to 4×H200
 Only after smoke test passes, switch to production configs:
 ```bash
-# Init full 0.88B model
+# Init full 1.0B model (32 layers, tied embeddings)
 python scripts/init_model_from_scratch.py --config configs/model_llama_1b_en_vi.yaml
 
 # Base pretrain — 4 GPUs, any IDs
@@ -230,7 +230,9 @@ python scripts/run_eval_lighteval.py --model_path outputs/pretrain --tasks math,
 
 **No pretrained checkpoint.** `init_model_from_scratch.py` creates random weights using `LlamaForCausalLM(config)` — never `from_pretrained`. All scripts pass `local_files_only=True` when loading models.
 
-**WSD (Warmup-Stable-Decay) LR scheduler** is implemented manually in `pretrain_hf.py` as a `TrainerCallback`, not via HF's built-in schedulers. The decay phase switches to a VI-dominant data mix (~70–80% VI).
+**WSD (Warmup-Stable-Decay) LR scheduler** is a real `LambdaLR` owned by a `WSDTrainer(Trainer)` subclass via `create_scheduler` (NOT a callback). A prior version set the LR in an `on_step_begin` callback while `TrainingArguments` installed a constant scheduler that overwrote it every step — so the optimizer fought the schedule and wandb logged a flat peak LR. Owning the scheduler makes warmup/decay both effective and correctly logged. Config: warmup 1k → stable 41k → exponential decay 8k (~16%), peak `4e-4` → min `4e-5`. During the decay phase the data stream optionally switches to a VI-dominant high-quality mix (see **decay-phase anneal** below).
+
+**Tied embeddings + 32 layers**: `tie_word_embeddings: true` shares the input/output embedding table (~98M saved at 64K vocab); that budget buys depth (24 → 32 layers) for a deeper-narrow ~1.004B model. Changing layer count auto-adjusts the depth-scaled residual init (reads `num_hidden_layers`).
 
 **Vocab size is padded to a multiple of 256** in `init_model_from_scratch.py` for GPU tensor-core efficiency. The tokenizer's actual vocab must match the model's `vocab_size`.
 
@@ -239,6 +241,14 @@ python scripts/run_eval_lighteval.py --model_path outputs/pretrain --tasks math,
 **Decoupled `head_dim=128`**: query/key/value projections produce `num_attention_heads * head_dim = 2048` dimensions, not `hidden_size=1536`. This is intentional (MiniCPM5-1B spec).
 
 **Packed token shards**: curation step 07 produces `.npy` or `.ds` (datatrove) files of pre-packed token sequences. `PackedTokenDataset` in `pretrain_hf.py` reads these; no dynamic packing happens at training time.
+
+**`PackedTokenDataset` emits `labels == input_ids`** — `LlamaForCausalLM` shifts internally (loss compares `logits[:-1]` to `labels[1:]`). A prior version pre-shifted labels (`chunk[1:L+1]`), causing a double-shift that trained next-next-token prediction; do not "fix" this back.
+
+**Train-time data ordering** (single ~104B-token pass = curriculum, all default-on via `data:` knobs): `shard_interleave` reads all shards concurrently and draws each sequence from a random live shard (dissolves the source-clustered sawtooth that shard-order shuffle alone can't, keeps mix ~proportional to token counts); plus a reservoir `shuffle_buffer_size` and per-epoch `shuffle_shards`.
+
+**Decay-phase anneal**: set `data.decay_shards_dir` to stream a high-quality VI+math subset during the LR-decay phase. Build it with `scripts/data/build_decay_shards.py` (filters `outputs/curated/pii_clean` by `metadata.source` to `curation_pipeline.yaml:decay_phase_mix.sources`, then re-tokenizes via stage 07). `PhaseSwitchDataset` + `DecayPhaseCallback` flip the stream at `decay_start = warmup + stable`.
+
+**Eval loss**: set `data.val_shards_dir` to held-out shards (NOT in `tokenized_shards_dir`) to log `eval_loss` every `eval_steps`; deterministic + capped by `eval_max_sequences`. Null → train loss only.
 
 **Context extension** stages must run in order (4k → 16k → 32k with ABF; 32k → 64k → 128k with YaRN). Skipping stages causes instability.
 
@@ -284,7 +294,7 @@ Bạn là một trợ lý AI thông minh, thành thạo tiếng Việt và tiế
 | `curation_pipeline.yaml` | All curation settings: language ID, quality filters, dedup, decontamination, PII, data source weights, tokenization |
 | `model_llama_1b_en_vi.yaml` | Production model architecture (do not use `from_pretrained`) |
 | `tokenizer_en_vi.yaml` | Tokenizer training (byte-level BPE, VI:EN ~60:40) |
-| `training_8xH200_hf_pretrain.yaml` | **Production** base pretrain on 4–8×H200, FSDP, WSD, wandb |
+| `training_8xH200_hf_pretrain.yaml` | **Production** base pretrain on 4–8×H200, FSDP `SHARD_GRAD_OP` (ZeRO-2, not FULL_SHARD), WSD, decay anneal, eval loss, wandb |
 | `training_longctx_{16,32,64,128}k.yaml` | Context extension stages |
 | `training_midtrain.yaml` | Optional math/VI mid-training |
 | `training_finetune_trl_sft.yaml` | SFT via TRL `SFTTrainer` |
