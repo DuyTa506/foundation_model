@@ -74,17 +74,41 @@ def wsd_scheduler(
 class PackedTokenDataset:
     """
     Reads pre-tokenized, packed shards produced by curate/07_tokenize_pack.py.
-    Yields fixed-length blocks of input_ids for causal LM training.
+    Yields fixed-length blocks for causal LM training.
+
+    Shards are written roughly one source at a time and are ~1 GB each, so naive
+    sequential reading trains on one distribution for thousands of steps (a sawtooth
+    / regime-block loss curve). Three ordering safeguards (all default-on) fix this:
+      - shard_interleave: read ALL shards concurrently, drawing each sequence from a
+        randomly chosen still-live shard. This is the important one — it dissolves
+        within-shard single-source runs that shard-order shuffle alone cannot, since
+        one shard dwarfs the buffer. Uniform draw over live shards also makes each
+        source's share ~proportional to its token count (your corpus mix falls out).
+      - a streaming shuffle buffer that locally permutes sequences (reservoir-style:
+        emit a random buffer slot, refill from stream).
+      - per-epoch reshuffle of the draw order (seeded by base seed + epoch).
+
+    Labels == input_ids on purpose. LlamaForCausalLM shifts internally
+    (loss compares logits[:-1] to labels[1:]); pre-shifting labels here would
+    double-shift and train next-next-token prediction.
     """
 
-    def __init__(self, shards_dir: str, max_seq_length: int):
-        import numpy as np
-        from torch.utils.data import IterableDataset
-
+    def __init__(
+        self,
+        shards_dir: str,
+        max_seq_length: int,
+        shuffle_buffer_size: int = 8192,
+        seed: int = 42,
+        shuffle_shards: bool = True,
+        shard_interleave: bool = True,
+        max_sequences: int | None = None,
+    ):
         shard_paths = sorted(Path(shards_dir).rglob("*.npy"))
         if not shard_paths:
-            # Try datatrove .ds token files
-            shard_paths = sorted(Path(shards_dir).rglob("*.ds"))
+            # datatrove .ds token files (skip the _scratch working dir)
+            shard_paths = sorted(
+                p for p in Path(shards_dir).rglob("*.ds") if "_scratch" not in p.parts
+            )
         if not shard_paths:
             raise FileNotFoundError(
                 f"No .npy or .ds token shards found in {shards_dir}. "
@@ -92,29 +116,97 @@ class PackedTokenDataset:
             )
         self._paths = shard_paths
         self._max_seq_length = max_seq_length
-        print(f"[dataset] {len(shard_paths)} shards in {shards_dir}  seq={max_seq_length}")
+        self._buffer_size = max(0, int(shuffle_buffer_size))
+        self._seed = int(seed)
+        self._shuffle_shards = bool(shuffle_shards)
+        self._shard_interleave = bool(shard_interleave)
+        self._max_sequences = int(max_sequences) if max_sequences else None
+        self._epoch = 0
+        print(
+            f"[dataset] {len(shard_paths)} shards in {shards_dir}  seq={max_seq_length}  "
+            f"interleave={self._shard_interleave}  shuffle_shards={self._shuffle_shards}  "
+            f"shuffle_buffer={self._buffer_size}"
+        )
 
-    def _iter_shard(self, path: Path) -> Iterator[dict]:
+    def _iter_shard(self, path: Path):
         import numpy as np
 
         if path.suffix == ".npy":
-            tokens = np.load(str(path), mmap_mode="r").astype("int32")
+            tokens = np.load(str(path), mmap_mode="r")
         else:
-            # datatrove .ds file: raw int32 array
-            tokens = np.frombuffer(path.read_bytes(), dtype=np.uint16).astype("int32")
+            # datatrove .ds file: raw little-endian uint16 token ids (memmap, not
+            # read_bytes — a 1B-token shard is ~2 GB and read_bytes loads it all).
+            tokens = np.memmap(path, dtype=np.uint16, mode="r")
 
         L = self._max_seq_length
-        n_chunks = len(tokens) // (L + 1)
+        stride = L + 1
+        n_chunks = len(tokens) // stride
         for i in range(n_chunks):
-            chunk = tokens[i * (L + 1) : (i + 1) * (L + 1)]
-            yield {
-                "input_ids": chunk[:L].tolist(),
-                "labels": chunk[1 : L + 1].tolist(),
-            }
+            start = i * stride
+            # copy out of the mmap into a small int64 array (releases the page view)
+            yield np.asarray(tokens[start : start + L], dtype=np.int64)
+
+    def _raw_iter(self):
+        import random
+
+        rng = random.Random(self._seed + self._epoch)
+
+        if not self._shard_interleave:
+            # Sequential: read one shard fully before the next (shuffled order only).
+            order = list(self._paths)
+            if self._shuffle_shards:
+                rng.shuffle(order)
+            for path in order:
+                yield from self._iter_shard(path)
+            return
+
+        # Interleaved multiplex: keep every shard's chunk-generator live at once and
+        # draw each sequence from a random live shard. memmaps are lazy (only touched
+        # pages load), so holding all shards open costs ~nothing. A shard drops out of
+        # `live` when exhausted; uniform choice over live shards ⇒ each shard's share
+        # is proportional to its remaining chunks ⇒ corpus mix preserved.
+        gens = [self._iter_shard(p) for p in self._paths]
+        live = list(range(len(gens)))
+        while live:
+            k = rng.randrange(len(live))
+            try:
+                yield next(gens[live[k]])
+            except StopIteration:
+                live.pop(k)
+
+    def _emit(self) -> Iterator[dict]:
+        import random
+
+        raw = self._raw_iter()
+        if self._buffer_size <= 1:
+            for chunk in raw:
+                ids = chunk.tolist()
+                yield {"input_ids": ids, "labels": ids}
+            return
+
+        rng = random.Random(self._seed * 7919 + self._epoch)
+        buffer: list = []
+        for chunk in raw:
+            buffer.append(chunk)
+            if len(buffer) >= self._buffer_size:
+                j = rng.randrange(len(buffer))
+                out = buffer[j]
+                buffer[j] = buffer[-1]
+                buffer.pop()
+                ids = out.tolist()
+                yield {"input_ids": ids, "labels": ids}
+        rng.shuffle(buffer)
+        for out in buffer:
+            ids = out.tolist()
+            yield {"input_ids": ids, "labels": ids}
 
     def __iter__(self) -> Iterator[dict]:
-        for path in self._paths:
-            yield from self._iter_shard(path)
+        self._epoch += 1
+        if self._max_sequences:  # bound eval (finite, deterministic) — never on train
+            from itertools import islice
+            yield from islice(self._emit(), self._max_sequences)
+        else:
+            yield from self._emit()
 
     def as_hf_dataset(self):
         from datasets import IterableDataset
@@ -125,7 +217,65 @@ class PackedTokenDataset:
         )
 
 
+# ─── WSD decay-phase data anneal ──────────────────────────────────────────────
+
+class PhaseState:
+    """Mutable holder a callback writes the live global_step into, so the streaming
+    dataset (which otherwise has no view of optimizer steps) can decide when to
+    switch from the broad mix to the decay-phase mix."""
+
+    def __init__(self) -> None:
+        self.global_step = 0
+
+
+class PhaseSwitchDataset:
+    """Streams `main_ds` until the LR-decay phase starts, then switches to
+    `decay_ds` (a small, high-quality VI+math mix) for the rest of training.
+
+    The switch is keyed off the callback-updated global step, so it lands at the
+    same step on every rank (a few sequences of dataloader prefetch slop near the
+    boundary is irrelevant at a ~45k-step switch point). `decay_ds` repeats if
+    exhausted — the decay phase intentionally over-weights HQ data, so re-reading
+    it a couple of times across the decay span is fine.
+    """
+
+    def __init__(self, main_ds, decay_ds, phase_state: PhaseState, decay_start_step: int):
+        self._main = main_ds
+        self._decay = decay_ds
+        self._phase = phase_state
+        self._decay_start = int(decay_start_step)
+
+    def _gen(self) -> Iterator[dict]:
+        if self._phase.global_step < self._decay_start:
+            for item in iter(self._main):
+                if self._phase.global_step >= self._decay_start:
+                    break
+                yield item
+        while True:  # decay phase (also entered directly when resuming into it)
+            for item in iter(self._decay):
+                yield item
+
+    def as_hf_dataset(self):
+        from datasets import IterableDataset
+
+        return IterableDataset.from_generator(lambda: self._gen(), features=None)
+
+
 # ─── Trainer callbacks ────────────────────────────────────────────────────────
+
+
+class DecayPhaseCallback(TrainerCallback):
+    """Publishes the live global_step into PhaseState so PhaseSwitchDataset can
+    flip to the decay mix at the right step (incl. after a resume)."""
+
+    def __init__(self, phase_state: PhaseState):
+        self._phase = phase_state
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self._phase.global_step = state.global_step
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        self._phase.global_step = state.global_step
 
 class MetricsFileCallback(TrainerCallback):
     """
@@ -358,8 +508,16 @@ def main() -> None:
     shards_dir = data_cfg["tokenized_shards_dir"]
     max_seq_length = data_cfg.get("max_seq_length", 4096)
 
-    packed_ds = PackedTokenDataset(shards_dir, max_seq_length)
-    train_dataset = packed_ds.as_hf_dataset()
+    packed_ds = PackedTokenDataset(
+        shards_dir,
+        max_seq_length,
+        shuffle_buffer_size=data_cfg.get("shuffle_buffer_size", 8192),
+        seed=cfg["run"].get("seed", 42),
+        shuffle_shards=data_cfg.get("shuffle_shards", True),
+        shard_interleave=data_cfg.get("shard_interleave", True),
+    )
+    # train_dataset is assembled after step counts are known (decay-anneal needs
+    # the decay_start step), see "WSD decay-phase data anneal" below.
 
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
     opt_cfg = cfg["optimization"]
@@ -371,6 +529,53 @@ def main() -> None:
     decay_steps = sched_cfg.get("decay_steps", max(1, total_steps // 10))
     stable_steps = total_steps - warmup_steps - decay_steps
     decay_half_life = sched_cfg.get("decay_half_life_steps", 5000)
+
+    # ── Assemble train_dataset (+ optional WSD decay-phase data anneal) ────────
+    # During the LR-decay phase, switch to a high-quality, VI-dominant + math mix
+    # (built by scripts/data/build_decay_shards.py). LR is collapsing toward min
+    # there, so whatever the model sees last is what it locks in — the MiniCPM
+    # annealing trick, and the highest-value ordering lever for a single pass.
+    decay_shards_dir = data_cfg.get("decay_shards_dir")
+    use_decay_anneal = bool(decay_shards_dir) and sched_cfg.get("decay_phase_data_mix", False)
+    phase_state = PhaseState()
+    if use_decay_anneal:
+        decay_start_step = warmup_steps + stable_steps
+        decay_ds = PackedTokenDataset(
+            decay_shards_dir,
+            max_seq_length,
+            shuffle_buffer_size=data_cfg.get("shuffle_buffer_size", 8192),
+            seed=cfg["run"].get("seed", 42) + 1,
+            shuffle_shards=data_cfg.get("shuffle_shards", True),
+            shard_interleave=data_cfg.get("shard_interleave", True),
+        )
+        train_dataset = PhaseSwitchDataset(
+            packed_ds, decay_ds, phase_state, decay_start_step
+        ).as_hf_dataset()
+        print(f"[pretrain] decay-phase anneal ON: switch to {decay_shards_dir} "
+              f"at step {decay_start_step} (last {decay_steps} steps)")
+    else:
+        train_dataset = packed_ds.as_hf_dataset()
+        if decay_shards_dir and not sched_cfg.get("decay_phase_data_mix", False):
+            print("[pretrain] decay_shards_dir set but scheduler.decay_phase_data_mix "
+                  "is false → anneal disabled")
+
+    # ── Optional held-out eval set (val loss) ─────────────────────────────────
+    # Point data.val_shards_dir at a few HELD-OUT shards (not in tokenized_shards_dir).
+    # Deterministic order + a hard sequence cap so eval is fast and comparable across
+    # checkpoints. Null → no eval (Trainer reports train loss only).
+    val_shards_dir = data_cfg.get("val_shards_dir")
+    eval_dataset = None
+    if val_shards_dir:
+        eval_dataset = PackedTokenDataset(
+            val_shards_dir,
+            max_seq_length,
+            shuffle_buffer_size=0,      # deterministic: same sequences every eval
+            shuffle_shards=False,
+            shard_interleave=False,
+            max_sequences=data_cfg.get("eval_max_sequences", 2000),
+        ).as_hf_dataset()
+        print(f"[pretrain] eval set: {val_shards_dir}  "
+              f"(<= {data_cfg.get('eval_max_sequences', 2000)} seqs/eval)")
 
     # ── Auto batch size: maintain target global_batch_tokens ─────────────────
     import torch, os as _os
@@ -442,6 +647,9 @@ def main() -> None:
         do_train=True,
         max_steps=total_steps,
         per_device_train_batch_size=micro_batch,
+        per_device_eval_batch_size=train_cfg.get("eval_micro_batch_size", micro_batch),
+        eval_strategy=("steps" if eval_dataset is not None else "no"),
+        eval_steps=train_cfg.get("eval_steps", 5000),
         gradient_accumulation_steps=grad_accum,
         learning_rate=opt_cfg["peak_learning_rate"],
         adam_beta1=opt_cfg["adam_beta1"],
@@ -449,8 +657,8 @@ def main() -> None:
         adam_epsilon=opt_cfg.get("adam_epsilon", 1e-8),
         weight_decay=opt_cfg["weight_decay"],
         max_grad_norm=opt_cfg["grad_clip"],
-        lr_scheduler_type="constant",  # WSD handled manually below
-        warmup_steps=0,               # WSD handled manually
+        lr_scheduler_type="constant",  # ignored: WSDTrainer.create_scheduler overrides it
+        warmup_steps=0,               # ignored: warmup is inside the WSD LambdaLR
         bf16=train_cfg.get("bf16", False),
         fp16=train_cfg.get("fp16", False),
         logging_steps=train_cfg.get("logging_steps", 10),
@@ -468,30 +676,26 @@ def main() -> None:
         # FSDP is configured via accelerate config, not here
     )
 
-    # ── Custom WSD LR schedule via callback ───────────────────────────────────
-    class WSDSchedulerCallback(TrainerCallback):
-        def __init__(self, trainer_ref, warmup, stable, decay, half_life, peak, min_l):
-            self.warmup = warmup
-            self.stable = stable
-            self.decay = decay
-            self.half_life = half_life
-            self.peak = peak
-            self.min_lr = min_l
-            self._total_stable = warmup + stable
-
-        def on_step_begin(self, args, state, control, **kwargs):
-            step = state.global_step
-            if step < self.warmup:
-                factor = step / max(1, self.warmup)
-            elif step < self._total_stable:
-                factor = 1.0
-            else:
-                steps_into = step - self._total_stable
-                factor = 0.5 ** (steps_into / max(1, self.half_life))
-                factor = max(factor, self.min_lr / max(self.peak, 1e-10))
-
-            for pg in kwargs.get("optimizer", {}).param_groups if "optimizer" in kwargs else []:
-                pg["lr"] = self.peak * factor
+    # ── Custom WSD LR schedule ────────────────────────────────────────────────
+    # Implemented as a real LambdaLR owned by the Trainer (via create_scheduler),
+    # NOT a callback. The previous callback set optimizer LR in on_step_begin, but
+    # TrainingArguments installs a constant scheduler whose .step() runs right after
+    # the optimizer and overwrote the LR back to peak every step — so the logged
+    # `learning_rate` (read from lr_scheduler.get_last_lr()) was always the peak.
+    # Letting HF own the WSD scheduler makes warmup/decay both effective and logged.
+    class WSDTrainer(Trainer):
+        def create_scheduler(self, num_training_steps: int, optimizer=None):
+            if self.lr_scheduler is None:
+                self.lr_scheduler = wsd_scheduler(
+                    optimizer=optimizer if optimizer is not None else self.optimizer,
+                    warmup_steps=warmup_steps,
+                    stable_steps=stable_steps,
+                    decay_steps=decay_steps,
+                    decay_half_life=decay_half_life,
+                    peak_lr=opt_cfg["peak_learning_rate"],
+                    min_lr=opt_cfg["min_learning_rate"],
+                )
+            return self.lr_scheduler
 
     # ── Data collator ─────────────────────────────────────────────────────────
     # Packed shards already have input_ids and labels; no masking needed here.
@@ -522,16 +726,6 @@ def main() -> None:
                 self._t0 = time.time()
                 self._s0 = state.global_step
 
-    wsd_cb = WSDSchedulerCallback(
-        trainer_ref=None,
-        warmup=warmup_steps,
-        stable=stable_steps,
-        decay=decay_steps,
-        half_life=decay_half_life,
-        peak=opt_cfg["peak_learning_rate"],
-        min_l=opt_cfg["min_learning_rate"],
-    )
-
     health_cfg = cfg.get("health_monitor", {})
     health_cb = TrainingHealthCallback(
         spike_factor=health_cfg.get("spike_factor", 1.5),
@@ -544,12 +738,17 @@ def main() -> None:
 
     metrics_cb = MetricsFileCallback(out_dir)
 
-    trainer = Trainer(
+    callbacks = [TokPerSecCallback(), health_cb, metrics_cb]
+    if use_decay_anneal:
+        callbacks.append(DecayPhaseCallback(phase_state))
+
+    trainer = WSDTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         data_collator=default_data_collator,
-        callbacks=[wsd_cb, TokPerSecCallback(), health_cb, metrics_cb],
+        callbacks=callbacks,
     )
 
     # ── Verify initial loss is ~ln(vocab_size) ───────────────────────────────

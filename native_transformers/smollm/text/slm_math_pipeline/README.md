@@ -1,6 +1,6 @@
 # EN+VI Math/Science SLM — From Scratch (MiniCPM-inspired)
 
-A **~0.88B parameter** small language model with **Vietnamese as the primary language**,
+A **~1.0B parameter** small language model with **Vietnamese as the primary language**,
 also supporting English. Target domains: mathematics, science, and language.
 Training recipe inspired by [MiniCPM](https://github.com/OpenBMB/MiniCPM)
 (WSD scheduler, UltraClean filtering, hybrid-thinking SFT, GRPO/RLVR).
@@ -12,18 +12,24 @@ Training recipe inspired by [MiniCPM](https://github.com/OpenBMB/MiniCPM)
 ```
 hidden_size:         1536
 intermediate_size:   4608
-num_hidden_layers:   24
+num_hidden_layers:   32   (deeper-narrow; favors math/reasoning at fixed params)
 num_attention_heads: 16   (GQA: num_key_value_heads=2)
 head_dim:            128  (decoupled; q/k/v -> 2048 dim)
 rope_theta:          5_000_000
 max_position_embeddings: 131072  (train base at 4096, extend to 128K)
 vocab_size:          64000  (custom EN+VI tokenizer, trained from scratch)
+tie_word_embeddings: true   (share input/output embeddings — saves ~98M @ 64K vocab)
 dtype:               bfloat16
 init:                normal(0, 0.02) + depth-scaled residual projections
+total params:        ~1.004B  (98.3M tied embeddings + 32 × 28.3M layers)
 ```
 
 > **No pretrained checkpoint is used.** All weights are randomly initialized
 > from scratch via `LlamaForCausalLM(config)`.
+>
+> **Tied embeddings + 32 layers.** With a 64K vocab the untied output projection
+> is ~98M wasted params; tying frees them, and that budget buys 8 extra layers
+> (24 → 32) — a deeper-narrow shape that helps reasoning at the same param count.
 
 ---
 
@@ -34,7 +40,7 @@ Stage -1  download_datasets         → pre-cache HF datasets to disk
 Stage 0   train_tokenizer           → from-scratch tokenizer (VI:EN ≈ 60:40)
 Stage 1   curate/ 00→07             → filtered + tokenized data shards
 Stage 2   init_model_from_scratch   → random-init checkpoint
-Stage 2   pretrain_hf (WSD 4k)     → base pretrain ~100B tokens (50k steps)
+Stage 2   pretrain_hf (WSD 4k)     → base pretrain ~104B tokens (50k steps) + decay anneal
 Stage 2b  pretrain_hf (16k)        → context extension ABF:  4k → 16k
 Stage 2b  pretrain_hf (32k)        → context extension ABF: 16k → 32k
 Stage 2b  pretrain_hf (64k)        → context extension YaRN: 32k → 64k
@@ -250,12 +256,33 @@ python scripts/generate.py --model outputs/smoke_train \
 
 ### Stage 2 — Init model + Pretrain
 
+> Assumes Stage 1 is done: `outputs/curated/tokenized/` holds the packed shards
+> (full 00–07 run ≈ **104B tokens**). The two sub-steps below are optional but
+> recommended — both reuse that already-curated data, no re-download/re-tokenize.
+
 ```bash
-# Create random-init checkpoint
+# Create random-init checkpoint (1.004B, 32 layers, tied embeddings)
 python scripts/init_model_from_scratch.py \
   --config configs/model_llama_1b_en_vi.yaml
+# Confirms: [init] total parameters: 1,004,373,504 (1.004B)
 
-# Base pretrain: context 4096, WSD scheduler, ~100B tokens (50k steps × 2M tok/step)
+# (Optional) Build the WSD decay-phase anneal set — a high-quality VI+math subset
+# filtered from outputs/curated/pii_clean by metadata.source, re-tokenized.
+# During the LR-decay phase the trainer streams THIS instead of the broad mix.
+python scripts/data/build_decay_shards.py \
+  --curation_config configs/curation_pipeline.yaml \
+  --output_dir outputs/curated/tokenized_decay \
+  --tokenizer_path outputs/tokenizer
+
+# (Optional) Hold out a shard or two for a real eval/val loss (not in the train dir)
+mkdir -p outputs/curated/val
+mv outputs/curated/tokenized/<one-or-two-shards>.ds outputs/curated/val/
+
+# Enable both in configs/training_8xH200_hf_pretrain.yaml → data:
+#   decay_shards_dir: outputs/curated/tokenized_decay
+#   val_shards_dir:   outputs/curated/val
+
+# Base pretrain: context 4096, WSD scheduler, ~108B seen ≈ 1 epoch (50k steps × ~2.16M tok)
 # --gpu_ids selects which GPUs to use (e.g. 4,5,6,7 if others are busy)
 bash scripts/launch_pretrain_hf.sh \
   --config configs/training_8xH200_hf_pretrain.yaml \
@@ -280,6 +307,26 @@ bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_32k.yaml  -
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_64k.yaml  --gpu_ids 4,5,6,7
 bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml --gpu_ids 4,5,6,7
 ```
+
+> **Base pretrain is a single pass over ~104B tokens, so read order = curriculum.**
+> The trainer handles this automatically (`data:` knobs, all default-on):
+> - `shard_interleave` — reads all shards concurrently, drawing each sequence from a
+>   random live shard. Shards are ~1 GB and written ~one source at a time, so naive
+>   sequential reading gives a sawtooth/regime-block loss; interleaving dissolves it and
+>   keeps the source mix ~proportional to token counts.
+> - `shuffle_buffer_size` (reservoir) + per-epoch `shuffle_shards` for local randomness.
+> - **Decay-phase anneal** — if `decay_shards_dir` is set, the last ~16% of steps (the LR
+>   decay phase) stream the high-quality VI+math set instead of the broad mix (MiniCPM
+>   trick: LR → min, so what's seen last is what's locked in).
+> - **Eval loss** — if `val_shards_dir` is set, `eval_loss` is logged every `eval_steps`
+>   on the held-out shards (deterministic + capped, so it's fast and comparable).
+>
+> **Parallelism:** FSDP `SHARD_GRAD_OP` (ZeRO-2), not `FULL_SHARD` — a ~1B model + Adam
+> fits with room to spare on a 141 GB H200, so full param sharding is just comms overhead.
+>
+> **First-30-seconds sanity check:** initial loss ≈ `ln(64000) = 11.07`; `learning_rate`
+> **ramps** over the first 1k steps (not flat); `[init] … 1.004B`; and a
+> `decay-phase anneal ON …` line if enabled.
 
 **GPU selection:** configs default to `gpus_per_node: 4`. Override at launch:
 ```bash
@@ -376,8 +423,13 @@ python scripts/run_eval_lighteval.py \
 
 ## Data Mix (VI-first, ~74% VI / ~26% EN)
 
-Target: **100B tokens** total (~50k steps × 2M tokens/step on 8×H200).
-EN is restricted to math+science only — no general English web text.
+Target: **~104B tokens** total — base pretrain runs ~50k steps × ~2.16M tok/step ≈ a
+single pass. EN is restricted to math+science only — no general English web text.
+
+> **Decay-phase anneal subset.** `decay_phase_mix.sources` in `curation_pipeline.yaml`
+> (`fineweb2_hq_vi`, `vi_curated`, `wikipedia_vi`, `finemath_4plus`) is the high-quality
+> mix streamed during the LR-decay phase. Build it with `build_decay_shards.py` (filters
+> the already-curated `pii_clean` by `metadata.source`, then re-tokenizes) — see Stage 2.
 
 ### Pretrain sources
 
@@ -458,7 +510,9 @@ logging:
 ## Notes
 
 - **No internet checkpoints.** All scripts use `local_files_only=True` during training.
-- **WSD scheduler**: Warmup (1k steps) → Stable → Exponential Decay (5k steps). Decay phase uses VI-dominant mix (~75% VI) defined in `curation_pipeline.yaml:decay_phase_mix`.
+- **WSD scheduler**: Warmup (1k) → Stable (41k) → Exponential Decay (8k, ~16% per MiniCPM4). Peak LR `4e-4` → min `4e-5`. The schedule is a real `LambdaLR` owned by the Trainer, so `learning_rate` is logged correctly (an earlier callback version logged a constant peak — fixed). Decay phase optionally switches to the VI-dominant anneal mix (`decay_shards_dir`).
+- **Train-time data ordering**: shards are interleaved (all read concurrently, random live-shard draw) + reservoir-buffer shuffled + reshuffled per epoch, so a single pass over ~104B tokens isn't source-clustered. Labels = input_ids (the model shifts internally; pre-shifting would double-shift).
+- **Eval loss**: set `data.val_shards_dir` (held-out shards) to log `eval_loss` every `eval_steps`; null = train loss only.
 - **Tokenizer**: byte-level BPE, NFC normalization (not NFKC — NFKC strips Vietnamese diacritics), `individual_digits=True` for math.
 - **Long-context**: staged extension 4k → 16k → 32k (ABF) → 64k → 128k (YaRN). Each step is a 2× factor; skipping stages is unstable.
 - **GRPO rewards**: correctness (sympy equivalence) + format (single `<think>` block) + language consistency (penalizes VI prompts generating EN/ZH reasoning).

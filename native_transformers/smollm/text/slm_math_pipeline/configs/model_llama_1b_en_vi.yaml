@@ -1,5 +1,11 @@
-# Model config: ~0.88B Llama-like EN+VI SLM (trained FROM SCRATCH)
+# Model config: ~1.0B Llama-like EN+VI SLM (trained FROM SCRATCH)
 # Architecture mirrors MiniCPM5-1B dims with decoupled head_dim.
+#
+# PARAM BUDGET (decoupled head_dim=128 → ~28.3M/layer: attn 7.1M + MLP 21.2M):
+#   tied embeddings (98.3M, shared in+out) + 32 layers (906.1M) ≈ 1.004B.
+#   Embeddings are TIED (Qwen3 ties 0.6–4B; with a 64K vocab the untied output
+#   table is ~98M wasted params). The freed budget was spent on depth: 24→32
+#   layers, a deeper-narrow shape that favors math/reasoning at fixed param count.
 # DO NOT use from_pretrained — init via LlamaForCausalLM(config) only.
 #
 # NOTE head_dim=128 is DECOUPLED: q/k/v project to num_attention_heads*head_dim=2048,
@@ -19,7 +25,7 @@ model:
   model_type: llama
   hidden_size: 1536
   intermediate_size: 4608
-  num_hidden_layers: 24
+  num_hidden_layers: 32        # was 24; +8 layers spends the params freed by tying
   num_attention_heads: 16
   num_key_value_heads: 2       # GQA: 16 query heads, 2 KV heads
   head_dim: 128                # decoupled; q/k/v -> 16*128 = 2048 dim
@@ -27,7 +33,7 @@ model:
   rope_theta: 5000000.0        # high theta enables cheap long-context extension
   rope_scaling: null           # null for base training; updated per longctx stage
   max_position_embeddings: 131072  # ceiling only; TRAIN at 4096 (see training config)
-  tie_word_embeddings: false
+  tie_word_embeddings: true    # share input/output embeddings (saves ~98M @ 64K vocab)
   vocab_size: 64000            # set by train_tokenizer.py; must match tokenizer
   attention_bias: false
   mlp_bias: false
