@@ -538,44 +538,56 @@ def main() -> None:
     decay_shards_dir = data_cfg.get("decay_shards_dir")
     use_decay_anneal = bool(decay_shards_dir) and sched_cfg.get("decay_phase_data_mix", False)
     phase_state = PhaseState()
+    train_dataset = None
     if use_decay_anneal:
         decay_start_step = warmup_steps + stable_steps
-        decay_ds = PackedTokenDataset(
-            decay_shards_dir,
-            max_seq_length,
-            shuffle_buffer_size=data_cfg.get("shuffle_buffer_size", 8192),
-            seed=cfg["run"].get("seed", 42) + 1,
-            shuffle_shards=data_cfg.get("shuffle_shards", True),
-            shard_interleave=data_cfg.get("shard_interleave", True),
-        )
-        train_dataset = PhaseSwitchDataset(
-            packed_ds, decay_ds, phase_state, decay_start_step
-        ).as_hf_dataset()
-        print(f"[pretrain] decay-phase anneal ON: switch to {decay_shards_dir} "
-              f"at step {decay_start_step} (last {decay_steps} steps)")
-    else:
+        try:  # default-on: a missing/empty decay dir must NOT crash the run
+            decay_ds = PackedTokenDataset(
+                decay_shards_dir,
+                max_seq_length,
+                shuffle_buffer_size=data_cfg.get("shuffle_buffer_size", 8192),
+                seed=cfg["run"].get("seed", 42) + 1,
+                shuffle_shards=data_cfg.get("shuffle_shards", True),
+                shard_interleave=data_cfg.get("shard_interleave", True),
+            )
+            train_dataset = PhaseSwitchDataset(
+                packed_ds, decay_ds, phase_state, decay_start_step
+            ).as_hf_dataset()
+            print(f"[pretrain] decay-phase anneal ON: switch to {decay_shards_dir} "
+                  f"at step {decay_start_step} (last {decay_steps} steps)")
+        except FileNotFoundError:
+            print(f"[pretrain] decay anneal requested but no shards in {decay_shards_dir} "
+                  f"→ falling back to broad mix (run build_decay_shards.py to enable)")
+            use_decay_anneal = False
+    elif decay_shards_dir and not sched_cfg.get("decay_phase_data_mix", False):
+        print("[pretrain] decay_shards_dir set but scheduler.decay_phase_data_mix "
+              "is false → anneal disabled")
+    if train_dataset is None:
         train_dataset = packed_ds.as_hf_dataset()
-        if decay_shards_dir and not sched_cfg.get("decay_phase_data_mix", False):
-            print("[pretrain] decay_shards_dir set but scheduler.decay_phase_data_mix "
-                  "is false → anneal disabled")
 
-    # ── Optional held-out eval set (val loss) ─────────────────────────────────
-    # Point data.val_shards_dir at a few HELD-OUT shards (not in tokenized_shards_dir).
-    # Deterministic order + a hard sequence cap so eval is fast and comparable across
-    # checkpoints. Null → no eval (Trainer reports train loss only).
+    # ── Held-out eval set (val loss), default-on ──────────────────────────────
+    # data.val_shards_dir points at HELD-OUT shards (not in tokenized_shards_dir);
+    # build a small source-stratified set with scripts/data/build_val_shard.py.
+    # Deterministic order + hard sequence cap so eval is fast and comparable across
+    # checkpoints. Missing/empty dir → warn and report train loss only (no crash).
     val_shards_dir = data_cfg.get("val_shards_dir")
     eval_dataset = None
     if val_shards_dir:
-        eval_dataset = PackedTokenDataset(
-            val_shards_dir,
-            max_seq_length,
-            shuffle_buffer_size=0,      # deterministic: same sequences every eval
-            shuffle_shards=False,
-            shard_interleave=False,
-            max_sequences=data_cfg.get("eval_max_sequences", 2000),
-        ).as_hf_dataset()
-        print(f"[pretrain] eval set: {val_shards_dir}  "
-              f"(<= {data_cfg.get('eval_max_sequences', 2000)} seqs/eval)")
+        try:
+            eval_dataset = PackedTokenDataset(
+                val_shards_dir,
+                max_seq_length,
+                shuffle_buffer_size=0,      # deterministic: same sequences every eval
+                shuffle_shards=False,
+                shard_interleave=False,
+                max_sequences=data_cfg.get("eval_max_sequences", 2000),
+            ).as_hf_dataset()
+            print(f"[pretrain] eval set: {val_shards_dir}  "
+                  f"(<= {data_cfg.get('eval_max_sequences', 2000)} seqs/eval)")
+        except FileNotFoundError:
+            print(f"[pretrain] val_shards_dir set but no shards in {val_shards_dir} "
+                  f"→ eval disabled, train loss only (run build_val_shard.py to enable)")
+            eval_dataset = None
 
     # ── Auto batch size: maintain target global_batch_tokens ─────────────────
     import torch, os as _os

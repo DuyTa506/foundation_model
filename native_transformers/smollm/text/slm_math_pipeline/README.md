@@ -257,8 +257,10 @@ python scripts/generate.py --model outputs/smoke_train \
 ### Stage 2 — Init model + Pretrain
 
 > Assumes Stage 1 is done: `outputs/curated/tokenized/` holds the packed shards
-> (full 00–07 run ≈ **104B tokens**). The two sub-steps below are optional but
-> recommended — both reuse that already-curated data, no re-download/re-tokenize.
+> (full 00–07 run ≈ **104B tokens**). The decay-anneal + eval sub-steps below are
+> **on by default** in the config and reuse already-curated data (no re-download/
+> re-tokenize). Build them before launch — or skip them and the trainer warns and
+> falls back (broad mix / train-loss-only), it won't crash.
 
 ```bash
 # Create random-init checkpoint (1.004B, 32 layers, tied embeddings)
@@ -266,23 +268,26 @@ python scripts/init_model_from_scratch.py \
   --config configs/model_llama_1b_en_vi.yaml
 # Confirms: [init] total parameters: 1,004,373,504 (1.004B)
 
-# (Optional) Build the WSD decay-phase anneal set — a high-quality VI+math subset
-# filtered from outputs/curated/pii_clean by metadata.source, re-tokenized.
-# During the LR-decay phase the trainer streams THIS instead of the broad mix.
+# Build the WSD decay-phase anneal set — a high-quality VI+math subset filtered from
+# outputs/curated/pii_clean by metadata.source (decay_phase_mix.sources), re-tokenized.
+# The trainer streams THIS during the LR-decay phase (config: data.decay_shards_dir).
 python scripts/data/build_decay_shards.py \
   --curation_config configs/curation_pipeline.yaml \
   --output_dir outputs/curated/tokenized_decay \
   --tokenizer_path outputs/tokenizer
 
-# (Optional) Hold out a shard or two for a real eval/val loss (not in the train dir)
-mkdir -p outputs/curated/val
-mv outputs/curated/tokenized/<one-or-two-shards>.ds outputs/curated/val/
-
-# Enable both in configs/training_8xH200_hf_pretrain.yaml → data:
-#   decay_shards_dir: outputs/curated/tokenized_decay
-#   val_shards_dir:   outputs/curated/val
+# Build a small SOURCE-STRATIFIED held-out val set → eval_loss (config: data.val_shards_dir).
+# Sampled per source ∝ corpus weight so val loss mirrors the train mix; ~16M tokens.
+# (Prefer this over holding out a whole 1B .ds shard — that can be source-skewed and
+#  wastes ~1B train tokens to eval on ~8M. See "Eval / val loss" note below.)
+python scripts/data/build_val_shard.py \
+  --curation_config configs/curation_pipeline.yaml \
+  --output_dir outputs/curated/val \
+  --tokenizer_path outputs/tokenizer \
+  --val_tokens 16000000
 
 # Base pretrain: context 4096, WSD scheduler, ~108B seen ≈ 1 epoch (50k steps × ~2.16M tok)
+# decay anneal + eval are already enabled in the config (built above).
 # --gpu_ids selects which GPUs to use (e.g. 4,5,6,7 if others are busy)
 bash scripts/launch_pretrain_hf.sh \
   --config configs/training_8xH200_hf_pretrain.yaml \
@@ -315,11 +320,23 @@ bash scripts/launch_pretrain_hf.sh --config configs/training_longctx_128k.yaml -
 >   sequential reading gives a sawtooth/regime-block loss; interleaving dissolves it and
 >   keeps the source mix ~proportional to token counts.
 > - `shuffle_buffer_size` (reservoir) + per-epoch `shuffle_shards` for local randomness.
-> - **Decay-phase anneal** — if `decay_shards_dir` is set, the last ~16% of steps (the LR
->   decay phase) stream the high-quality VI+math set instead of the broad mix (MiniCPM
->   trick: LR → min, so what's seen last is what's locked in).
-> - **Eval loss** — if `val_shards_dir` is set, `eval_loss` is logged every `eval_steps`
->   on the held-out shards (deterministic + capped, so it's fast and comparable).
+> - **Decay-phase anneal** (default on) — the last ~16% of steps (the LR decay phase)
+>   stream the high-quality VI+math set (`decay_shards_dir`) instead of the broad mix
+>   (MiniCPM trick: LR → min, so what's seen last is what's locked in).
+> - **Eval loss** (default on) — `eval_loss` is logged every `eval_steps` on the
+>   held-out `val_shards_dir` (deterministic + capped, fast and comparable).
+>
+> Both are default-on in the config but degrade gracefully: a missing/empty
+> `decay_shards_dir` falls back to the broad mix, a missing `val_shards_dir` reports
+> train loss only — neither crashes the run.
+>
+> **Eval / val loss — how to build it.** `scripts/data/build_val_shard.py` samples a
+> small held-out set **stratified by source ∝ corpus weight**, so val loss mirrors the
+> training mix. Prefer it over holding out a whole 1B `.ds` shard: a single shard can be
+> skewed toward whichever source-files lead it, and wastes ~1B train tokens to eval on
+> only ~`eval_max_sequences` (~8M). Caveat: its docs also exist in `tokenized/` (a
+> *monitoring* val, not strict held-out) — mild for a single-epoch run; for zero leakage
+> instead carve from `.ds` and trim (less representative). Two valid tradeoff points.
 >
 > **Parallelism:** FSDP `SHARD_GRAD_OP` (ZeRO-2), not `FULL_SHARD` — a ~1B model + Adam
 > fits with room to spare on a 141 GB H200, so full param sharding is just comms overhead.

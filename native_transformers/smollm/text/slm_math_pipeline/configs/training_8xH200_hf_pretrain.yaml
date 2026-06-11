@@ -45,14 +45,19 @@ data:
   shard_interleave: true
   shuffle_shards: true
   shuffle_buffer_size: 8192
-  # WSD decay-phase anneal: during the LR-decay phase, stream from this high-quality
-  # VI+math shard set instead of the broad mix (built by build_decay_shards.py).
-  # Null = disabled (broad mix the whole run). Requires scheduler.decay_phase_data_mix.
-  decay_shards_dir: null       # e.g. outputs/curated/tokenized_decay
-  # Held-out eval set → real val loss (logged as eval_loss). Point this at a few
-  # shards NOT in tokenized_shards_dir. Null = no eval (train loss only). Hold one
-  # out with e.g.:  mkdir -p outputs/curated/val && mv outputs/curated/tokenized/<one>.ds outputs/curated/val/
-  val_shards_dir: null         # e.g. outputs/curated/val
+  # WSD decay-phase anneal (DEFAULT ON): during the LR-decay phase, stream from this
+  # high-quality VI+math shard set instead of the broad mix. Build it FIRST with:
+  #   python scripts/data/build_decay_shards.py --tokenizer_path outputs/tokenizer \
+  #     --output_dir outputs/curated/tokenized_decay
+  # If the dir is missing/empty the trainer warns and falls back to the broad mix
+  # (no crash). Requires scheduler.decay_phase_data_mix (also on by default).
+  decay_shards_dir: outputs/curated/tokenized_decay
+  # Held-out eval set → real val loss (logged as eval_loss) (DEFAULT ON). Build a
+  # small source-stratified val set FIRST with:
+  #   python scripts/data/build_val_shard.py --tokenizer_path outputs/tokenizer \
+  #     --output_dir outputs/curated/val --val_tokens 16000000
+  # Missing/empty dir → trainer warns and reports train loss only (no crash).
+  val_shards_dir: outputs/curated/val
   eval_max_sequences: 2000     # hard cap per eval so it stays fast + comparable
 
 # ── Optimizer ────────────────────────────────────────────────────────────────
