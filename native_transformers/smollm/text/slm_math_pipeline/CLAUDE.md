@@ -246,9 +246,9 @@ python scripts/run_eval_lighteval.py --model_path outputs/pretrain --tasks math,
 
 **Train-time data ordering** (single ~104B-token pass = curriculum, all default-on via `data:` knobs): `shard_interleave` reads all shards concurrently and draws each sequence from a random live shard (dissolves the source-clustered sawtooth that shard-order shuffle alone can't, keeps mix ~proportional to token counts); plus a reservoir `shuffle_buffer_size` and per-epoch `shuffle_shards`.
 
-**Decay-phase anneal**: set `data.decay_shards_dir` to stream a high-quality VI+math subset during the LR-decay phase. Build it with `scripts/data/build_decay_shards.py` (filters `outputs/curated/pii_clean` by `metadata.source` to `curation_pipeline.yaml:decay_phase_mix.sources`, then re-tokenizes via stage 07). `PhaseSwitchDataset` + `DecayPhaseCallback` flip the stream at `decay_start = warmup + stable`.
+**Decay-phase anneal** (default-on in the production config): `data.decay_shards_dir` streams a high-quality VI+math subset during the LR-decay phase. Build it with `scripts/data/build_decay_shards.py` (filters `outputs/curated/pii_clean` by `metadata.source` to `curation_pipeline.yaml:decay_phase_mix.sources`, then re-tokenizes via stage 07). `PhaseSwitchDataset` + `DecayPhaseCallback` flip the stream at `decay_start = warmup + stable`. A missing/empty dir warns and falls back to the broad mix (no crash).
 
-**Eval loss**: set `data.val_shards_dir` to held-out shards (NOT in `tokenized_shards_dir`) to log `eval_loss` every `eval_steps`; deterministic + capped by `eval_max_sequences`. Null → train loss only.
+**Eval loss** (default-on): `data.val_shards_dir` (held-out, NOT in `tokenized_shards_dir`) logs `eval_loss` every `eval_steps`; deterministic + capped by `eval_max_sequences`. Build a small **source-stratified** set with `scripts/data/build_val_shard.py` (samples `pii_clean` per source ∝ corpus weight so val mirrors the train mix — preferred over holding out a whole 1B `.ds` shard, which can be source-skewed; note the sample overlaps train, so it's a *monitoring* val). A missing/empty dir warns and reports train loss only (no crash).
 
 **Context extension** stages must run in order (4k → 16k → 32k with ABF; 32k → 64k → 128k with YaRN). Skipping stages causes instability.
 
