@@ -78,7 +78,13 @@ fsdp_config:
   fsdp_backward_prefetch_policy: BACKWARD_PRE
   fsdp_forward_prefetch: false
   fsdp_offload_params: false
-  fsdp_sharding_strategy: 1           # FULL_SHARD
+  # SHARD_GRAD_OP (ZeRO-2: shard grads+optimizer, replicate params) not FULL_SHARD.
+  # A 0.88B model + Adam states is ~15 GB and fits with huge headroom on a 141 GB
+  # H200, so FULL_SHARD's per-layer param all-gather on every fwd/bwd is pure comms
+  # overhead for no memory benefit (~200k tok/s on 4×H200 ≈ 25% MFU is comms-bound).
+  # SHARD_GRAD_OP drops the forward all-gather. Set back to 1 only if you later
+  # scale the model past what fits per GPU.
+  fsdp_sharding_strategy: 2           # SHARD_GRAD_OP
   fsdp_state_dict_type: FULL_STATE_DICT
   fsdp_sync_module_states: true
   fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer

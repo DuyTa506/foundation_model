@@ -33,11 +33,34 @@ data:
   max_seq_length: 4096
   packing: true                # packed, no padding (shards pre-packed by 07_tokenize_pack.py)
   dataloader_num_workers: 1    # PackedTokenDataset wraps to 1 HF shard; >1 is wasted
+  # Train-time de-clustering (shards are ~1 GB and written ~one source at a time;
+  # reading them in order gives a sawtooth/regime-block loss as the distribution
+  # switches). At ~104B tokens this is ~1 epoch, so read order IS the curriculum.
+  #   shard_interleave: read all shards concurrently, drawing each sequence from a
+  #     random live shard — dissolves within-shard single-source runs (the buffer
+  #     alone can't, since one 1B shard dwarfs it) and keeps source mix ~proportional
+  #     to token counts. This is the important knob; leave on.
+  #   shuffle_buffer_size: reservoir buffer for local permutation (8192 seqs × 4096
+  #     ≈ 33M tokens in flight). shuffle_shards: per-epoch reshuffle of draw order.
+  shard_interleave: true
+  shuffle_shards: true
+  shuffle_buffer_size: 8192
+  # WSD decay-phase anneal: during the LR-decay phase, stream from this high-quality
+  # VI+math shard set instead of the broad mix (built by build_decay_shards.py).
+  # Null = disabled (broad mix the whole run). Requires scheduler.decay_phase_data_mix.
+  decay_shards_dir: null       # e.g. outputs/curated/tokenized_decay
+  # Held-out eval set → real val loss (logged as eval_loss). Point this at a few
+  # shards NOT in tokenized_shards_dir. Null = no eval (train loss only). Hold one
+  # out with e.g.:  mkdir -p outputs/curated/val && mv outputs/curated/tokenized/<one>.ds outputs/curated/val/
+  val_shards_dir: null         # e.g. outputs/curated/val
+  eval_max_sequences: 2000     # hard cap per eval so it stays fast + comparable
 
 # ── Optimizer ────────────────────────────────────────────────────────────────
 optimization:
-  peak_learning_rate: 3.0e-4
-  min_learning_rate: 3.0e-5    # ~10% of peak at end of decay
+  peak_learning_rate: 4.0e-4   # was 3e-4; notes §4 cite 1e-4–6e-4 for sub-2B (Qwen-1.8B=6e-4).
+                               # 4e-4 is a safe step up for a deeper 32-layer net; after a
+                               # stable smoke/early run you can push toward 5–6e-4.
+  min_learning_rate: 4.0e-5    # ~10% of peak at end of decay
   adam_beta1: 0.9
   adam_beta2: 0.95
   adam_epsilon: 1.0e-8
@@ -52,9 +75,11 @@ optimization:
 scheduler:
   type: warmup_stable_decay    # custom scheduler in scripts/pretrain_hf.py
   warmup_steps: 1000
-  stable_steps: null           # auto: total_steps - warmup_steps - decay_steps
-  decay_steps: 5000            # ~10% of 50k total steps
-  decay_half_life_steps: 1250  # T in MiniCPM formula (~2.5B tokens at 2M tok/step)
+  stable_steps: null           # auto: total_steps - warmup_steps - decay_steps (=41000)
+  decay_steps: 8000            # ~16% of 50k (MiniCPM4 used 1.3T/8.3T≈16%); was 5000
+  decay_half_life_steps: 2400  # T tuned so 0.5^(8000/T)≈min/peak=0.1 → LR glides to
+                               # min across the whole decay phase instead of bottoming
+                               # out early and sitting flat. (was 1250)
   # At the start of decay phase, the data mix switches to the vi_dominant decay mix
   # defined in curation_pipeline.yaml:decay_phase_mix.
   decay_phase_data_mix: true
@@ -66,7 +91,10 @@ training:
   # global_batch_tokens = micro_batch * grad_accum * num_gpus * seq_len
   # 4 GPU: 12 * 11 * 4 * 4096 = 2,162,688 ≈ 2.16M tokens/step  ✓
   # 8 GPU: 12 *  6 * 8 * 4096 = 2,359,296 ≈ 2.36M tokens/step  (grad_accum=6)
-  total_steps: 50000           # ~100B tokens at 2M tok/step
+  total_steps: 50000           # 50k × 2.16M = ~108B seen ≈ 1 epoch over the ~104B corpus
+  # DATA BUDGET: full 00–07 curation ≈ 104B tokens, so this is ~a single pass — which
+  # is why ordering (shard_interleave + decay anneal above) matters: read order IS the
+  # curriculum. Sanity-check by watching when `epoch` first crosses 1.0 (~step 48k).
   logging_steps: 10
   save_steps: 1000
   eval_steps: 5000
