@@ -212,13 +212,35 @@ def build_dataset_language_map(cfg: dict) -> dict:
     return out
 
 
+def vi_diacritic_fraction(text: str) -> float:
+    """Fraction of chars that are Vietnamese diacritics — a strong VI signal
+    (EN/code/math ≈ 0; VI prose is typically well above a few %)."""
+    if not text:
+        return 0.0
+    return sum(1 for c in text if c in _VI_DIACRITICS) / len(text)
+
+
 def resolve_language(doc, ds2lang: dict) -> str:
-    """Best-effort language for a doc: prefer metadata.language (set by stage 02+),
-    else map metadata.dataset via the config (works at stage 01 before language-ID)."""
+    """Best-effort language from METADATA only: prefer metadata.language (set by
+    stage 02+), else map metadata.dataset via the config (works at stage 01 before
+    language-ID). Returns "" if neither is available."""
     lang = (doc.metadata.get("language") or "").lower()
     if lang:
         return lang
     return ds2lang.get(doc.metadata.get("dataset", ""), "")
+
+
+def is_vietnamese(doc, ds2lang: dict, vi_detect_ratio: float = 0.01) -> bool:
+    """Decide if a doc is Vietnamese, robust to MISSING metadata:
+      1. metadata.language (stage 02+), else
+      2. metadata.dataset → config language (stage 01), else
+      3. content: VI-diacritic fraction ≥ vi_detect_ratio (no metadata at all).
+    Step 3 guarantees VI prose is never dumped into the English filter chain just
+    because it lacks a language flag."""
+    lang = resolve_language(doc, ds2lang)
+    if lang:
+        return lang.startswith("vi")
+    return vi_diacritic_fraction(doc.text or "") >= vi_detect_ratio
 
 
 def build_quality_router(cfg: dict):
@@ -239,6 +261,7 @@ def build_quality_router(cfg: dict):
 
     qf = cfg.get("quality_filter", {})
     vi_diacritic_min = qf.get("vi_diacritic_min_ratio", 0.002)
+    vi_detect_ratio = qf.get("vi_detect_diacritic_ratio", 0.01)
     mwl = qf.get("mean_word_length", [3, 10])
     common = dict(
         max_doc_words=None,
@@ -250,10 +273,7 @@ def build_quality_router(cfg: dict):
     )
 
     def _vi_diacritic_ok(doc) -> bool:
-        text = doc.text or ""
-        if not text:
-            return False
-        return sum(1 for c in text if c in _VI_DIACRITICS) / len(text) >= vi_diacritic_min
+        return vi_diacritic_fraction(doc.text or "") >= vi_diacritic_min
 
     en_filters = [
         GopherQualityFilter(min_doc_words=qf.get("min_words", 50),
@@ -274,7 +294,7 @@ def build_quality_router(cfg: dict):
     ds2lang = build_dataset_language_map(cfg)
 
     def route(doc) -> bool:
-        if resolve_language(doc, ds2lang).startswith("vi"):
+        if is_vietnamese(doc, ds2lang, vi_detect_ratio):
             return all(_filter_passes(f, doc) for f in vi_filters) and _vi_diacritic_ok(doc)
         return all(_filter_passes(f, doc) for f in en_filters)
 
