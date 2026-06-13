@@ -23,7 +23,9 @@ from collections import Counter
 
 import yaml
 
-from _curate_utils import build_quality_router, _filter_passes
+from _curate_utils import (
+    build_dataset_language_map, build_quality_router, resolve_language, _filter_passes,
+)
 
 
 def _legacy_router(cfg: dict):
@@ -60,9 +62,12 @@ def main() -> None:
     import pyarrow.parquet as pq
     from datatrove.data import Document
 
+    import random
+
     cfg = yaml.safe_load(open(args.config))
     new_route = build_quality_router(cfg)
     old_route = _legacy_router(cfg)
+    ds2lang = build_dataset_language_map(cfg)
 
     # tallies keyed by (level, key) → counts
     tot = Counter(); old_keep = Counter(); new_keep = Counter()
@@ -72,7 +77,10 @@ def main() -> None:
         old_keep[(level, key)] += int(kept_old)
         new_keep[(level, key)] += int(kept_new)
 
-    files = sorted(glob.glob(os.path.join(args.input_dir, "**", "*.parquet"), recursive=True))
+    # Shuffle file order so the sample spans ALL datasets (raw is per-source dir; reading
+    # in sorted order would sample only the first source, e.g. all c4_vi).
+    files = glob.glob(os.path.join(args.input_dir, "**", "*.parquet"), recursive=True)
+    random.Random(0).shuffle(files)
     n = 0
     for fp in files:
         if n >= args.max_docs:
@@ -87,7 +95,8 @@ def main() -> None:
                 m = m or {}
                 doc = Document(text=txt or "", id=str(n), metadata=dict(m))
                 ko = old_route(doc); kn = new_route(doc)
-                lang = (m.get("language") or "?")
+                # resolve language via dataset map (raw has no language tag pre-stage-02)
+                lang = resolve_language(doc, ds2lang) or "?"
                 ds = (m.get("dataset") or "?")
                 tally("LANG", lang, ko, kn)
                 tally("DATASET", ds, ko, kn)

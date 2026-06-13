@@ -38,9 +38,9 @@ total params:        ~1.004B  (98.3M tied embeddings + 32 × 28.3M layers)
 ```
 Stage -1  download_datasets         → pre-cache HF datasets to disk
 Stage 0   train_tokenizer           → from-scratch tokenizer (VI:EN ≈ 60:40)
-Stage 1   curate/ 00→07             → filtered + tokenized data shards
+Stage 1   curate/ 00→07             → filter (lang-routed) → mix-cap (6.5) → tokenized shards
 Stage 2   init_model_from_scratch   → random-init checkpoint
-Stage 2   pretrain_hf (WSD 4k)     → base pretrain ~104B tokens (50k steps) + decay anneal
+Stage 2   pretrain_hf (WSD 4k)     → base pretrain (size = build_mixed_corpus --target_tokens) + decay anneal
 Stage 2b  pretrain_hf (16k)        → context extension ABF:  4k → 16k
 Stage 2b  pretrain_hf (32k)        → context extension ABF: 16k → 32k
 Stage 2b  pretrain_hf (64k)        → context extension YaRN: 32k → 64k
@@ -178,9 +178,13 @@ python scripts/curate/00_materialize.py \
   --cache_dir /data/hf_cache \
   --output_dir outputs/curated/raw
 
-# 1b. Heuristic quality filtering (Gopher + C4 + FineWeb)
+# 1b. Heuristic quality filtering — LANGUAGE-ROUTED (Gopher + C4 + FineWeb)
+#     VI gets a relaxed chain; EN keeps the full English chain. The English-tuned
+#     rules (esp. Gopher's English `min_stop_words`) otherwise reject ~90% of VI.
 python scripts/curate/01_quality_filter.py \
   --config configs/curation_pipeline.yaml
+#     Sanity-check survival OLD vs NEW per language/dataset before a full run:
+#     python scripts/curate/measure_filter_survival.py --input_dir outputs/curated/raw --max_docs 100000
 
 # 1c. Language identification (GlotLID: en/vi)
 python scripts/curate/02_language_id.py
@@ -197,10 +201,30 @@ python scripts/curate/05_decontaminate.py
 # 1g. PII redaction
 python scripts/curate/06_pii_redact.py
 
-# 1h. Tokenize + pack into shards
+# 1h. Enforce the target token MIXTURE + fix source attribution (stage 6.5).
+#     Caps each source to weight×target on the deduped corpus (so VI/EN mix is exactly
+#     as configured and no source dominates), and re-stamps metadata.source from the
+#     intact `dataset` field. Tokenize the MIXED output, not raw pii_clean.
+python scripts/curate/build_mixed_corpus.py \
+  --config configs/curation_pipeline.yaml \
+  --input_dir outputs/curated/pii_clean \
+  --output_dir outputs/curated/mixed \
+  --target_tokens 50e9
+
+# 1i. Tokenize + pack into shards (read the MIXED corpus)
 python scripts/curate/07_tokenize_pack.py \
+  --input_dir outputs/curated/mixed \
   --tokenizer_path outputs/tokenizer
 ```
+
+> **Why the language-routed filter + mixture step matter.** A naive run of the
+> English-tuned Gopher/C4/FineWeb rules rejected ~90% of Vietnamese (Gopher's
+> `min_stop_words=2` checks *English* stop words — a pure-VI doc has zero), collapsing
+> a ~100B-raw corpus to ~7.9B and skewing it toward the EN sources that survived. The
+> routed filter (`_curate_utils.build_quality_router`) recovers VI ~10× (vi survival
+> 9%→92%, EN unchanged); `build_mixed_corpus.py` then caps the result to the configured
+> VI/EN mix. **Always measure `.ds` token count (bytes/2) after stage 07 — don't trust
+> the HF `epoch` counter, which for a length-less IterableDataset is just step/max_steps.**
 
 > **Curation is built to run unattended at high worker counts.** Every stage writer
 > emits one uniform `{source,dataset,language}` metadata schema, so heterogeneous
@@ -438,15 +462,26 @@ python scripts/run_eval_lighteval.py \
 
 ---
 
-## Data Mix (VI-first, ~74% VI / ~26% EN)
+## Data Mix (VI-first, ~73% VI / ~27% EN)
 
-Target: **~104B tokens** total — base pretrain runs ~50k steps × ~2.16M tok/step ≈ a
-single pass. EN is restricted to math+science only — no general English web text.
+The `weight:` column below is the **target** mix; it is **enforced** by
+`build_mixed_corpus.py` (stage 6.5), which caps each source to `weight × --target_tokens`
+on the deduped corpus. The weights are *not* applied earlier in the pipeline — the raw
+mix is "whatever survives filtering" until the mixture step. EN is restricted to
+math+science only (no general English web).
+
+> ⚠ **Token budget reality.** The total is `build_mixed_corpus --target_tokens`, NOT the
+> sum below — those are pre-curation estimates. Measure actual tokens after stage 07
+> (`sum(.ds bytes)/2`). With the language-routed filter, VI is abundant (~70B available
+> from current raw) but **EN math is the bottleneck** (~6B available; `ultradata_math`
+> currently materializes 0 — gated/failed). So at 73/27, existing raw caps the total at
+> ~20–25B; to reach 40–60B, download MORE EN math (full finemath/open_web_math, fix
+> ultradata_math), not more VI.
 
 > **Decay-phase anneal subset.** `decay_phase_mix.sources` in `curation_pipeline.yaml`
-> (`fineweb2_hq_vi`, `vi_curated`, `wikipedia_vi`, `finemath_4plus`) is the high-quality
-> mix streamed during the LR-decay phase. Build it with `build_decay_shards.py` (filters
-> the already-curated `pii_clean` by `metadata.source`, then re-tokenizes) — see Stage 2.
+> (`fineweb2_hq_vi`, `vi_curated`, `wikipedia_vi`, `finemath_4plus`) is streamed during
+> the LR-decay phase. Build with `build_decay_shards.py` — point `--input_dir` at the
+> `mixed/` output (correct `source` tags), see Stage 2.
 
 ### Pretrain sources
 
@@ -531,6 +566,8 @@ logging:
 - **Train-time data ordering**: shards are interleaved (all read concurrently, random live-shard draw) + reservoir-buffer shuffled + reshuffled per epoch, so a single pass over ~104B tokens isn't source-clustered. Labels = input_ids (the model shifts internally; pre-shifting would double-shift).
 - **Eval loss**: set `data.val_shards_dir` (held-out shards) to log `eval_loss` every `eval_steps`; null = train loss only.
 - **Tokenizer**: byte-level BPE, NFC normalization (not NFKC — NFKC strips Vietnamese diacritics), `individual_digits=True` for math.
+  - **Frozen vs the model.** Re-running curation (01→07) reuses `outputs/tokenizer/` as-is — do NOT retrain it, because the model embeddings are tied to this 64K vocab; a new tokenizer forces a full `init_model_from_scratch`.
+  - **Check fertility** in `outputs/tokenizer/tokenizer_card.json` (tokens/word). VI/EN are efficient at 64K (≈1.08 / 1.25, under target). Watch **`latex` fertility** — a test card showed ≈3.7 vs a 2.5 target, meaning math tokenizes ~50% over budget; if the production card is also high, the only fix is **retraining the tokenizer** with more math/LaTeX in `tokenizer_en_vi.yaml` (→ re-init). Do this in the same reset if needed, since it's a math-first model.
 - **Long-context**: staged extension 4k → 16k → 32k (ABF) → 64k → 128k (YaRN). Each step is a 2× factor; skipping stages is unstable.
 - **GRPO rewards**: correctness (sympy equivalence) + format (single `<think>` block) + language consistency (penalizes VI prompts generating EN/ZH reasoning).
 - **Wikipedia VI** is only 1% weight (~0.3B unique tokens) to avoid excessive upsampling (~15× at higher weights).

@@ -126,14 +126,29 @@ python scripts/download_datasets.py --dry_run  # preview only
 #   2. else existing HF arrow cache under <cache_dir> (old full download)        → reused, no re-download
 #   3. else                                                                      → download from HF
 python scripts/curate/00_materialize.py --config configs/curation_pipeline.yaml --cache_dir /data/hf_cache --output_dir outputs/curated/raw
-python scripts/curate/01_quality_filter.py --config configs/curation_pipeline.yaml
+python scripts/curate/01_quality_filter.py --config configs/curation_pipeline.yaml  # language-routed (VI relaxed / EN full)
 python scripts/curate/02_language_id.py
 python scripts/curate/03_ultraclean_filter.py
 python scripts/curate/04_dedup_minhash.py
 python scripts/curate/05_decontaminate.py
 python scripts/curate/06_pii_redact.py
-python scripts/curate/07_tokenize_pack.py --tokenizer_path outputs/tokenizer
+# Stage 6.5: enforce target mixture + re-stamp source (cap each source to weight×target);
+# tokenize the MIXED output, not raw pii_clean.
+python scripts/curate/build_mixed_corpus.py --config configs/curation_pipeline.yaml \
+  --input_dir outputs/curated/pii_clean --output_dir outputs/curated/mixed --target_tokens 50e9
+python scripts/curate/07_tokenize_pack.py --input_dir outputs/curated/mixed --tokenizer_path outputs/tokenizer
 ```
+
+**Quality filter is language-routed** (`_curate_utils.build_quality_router`): the
+English-tuned Gopher/C4/FineWeb rules — esp. Gopher's `min_stop_words=2` against ENGLISH
+stop words — reject ~90% of Vietnamese (a pure-VI doc has 0 English stop words). VI gets a
+relaxed chain (`min_stop_words=0`, `min_avg_word_length=2`, drop FineWeb, neuter C4's EN
+sentence/punct rules); EN keeps the full chain. Verify with `measure_filter_survival.py`
+(measured: vi 9%→92%, EN unchanged). **The per-source `weight:` is NOT applied during
+filtering** — it's enforced only by `build_mixed_corpus.py` (stage 6.5), which also
+re-stamps `metadata.source` from the intact `dataset` field (raw `source` is blank).
+**Measure real token count via `.ds` bytes/2** — the HF `epoch` counter is meaningless for
+a length-less IterableDataset (it's just step/max_steps).
 
 ### Tokenizer training (Stage 0)
 ```bash
