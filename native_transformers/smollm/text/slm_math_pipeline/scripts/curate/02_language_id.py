@@ -12,7 +12,7 @@ language detection with confidence thresholding.  Keeps only English
 Usage:
     python scripts/curate/02_language_id.py \
         --config configs/curation_pipeline.yaml \
-        --input_dir outputs/curated/quality_filtered \
+        --input_dir outputs/curated/raw \
         --output_dir outputs/curated/lang_filtered
 """
 
@@ -167,7 +167,7 @@ def build_pipeline(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Language ID filter (keep en/vi).")
     parser.add_argument("--config", default="configs/curation_pipeline.yaml")
-    parser.add_argument("--input_dir", default="outputs/curated/quality_filtered")
+    parser.add_argument("--input_dir", default="outputs/curated/raw")
     parser.add_argument("--output_dir", default="outputs/curated/lang_filtered")
     parser.add_argument("--workers", type=int, default=max(1, os.cpu_count() - 2))
     args = parser.parse_args()

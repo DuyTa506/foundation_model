@@ -178,25 +178,37 @@ python scripts/curate/00_materialize.py \
   --cache_dir /data/hf_cache \
   --output_dir outputs/curated/raw
 
-# 1b. Heuristic quality filtering — LANGUAGE-ROUTED (Gopher + C4 + FineWeb)
-#     VI gets a relaxed chain; EN keeps the full English chain. The English-tuned
-#     rules (esp. Gopher's English `min_stop_words`) otherwise reject ~90% of VI.
+# Optimized stage order (FineWeb/DCLM): language-ID (02) runs BEFORE the quality filter
+# so it routes on real per-doc GlotLID labels; dedup (04) runs BEFORE the model classifier
+# (03) so the classifier never wastes compute on duplicates. Stages take --input_dir/
+# --output_dir, so the numeric names stay — only the data wiring is reordered.
+
+# 1b. Language identification (GlotLID: en/vi) — FIRST, feeds the router
+python scripts/curate/02_language_id.py \
+  --input_dir outputs/curated/raw --output_dir outputs/curated/lang_filtered
+
+# 1c. Heuristic quality filtering — LANGUAGE/ROLE-ROUTED (3 chains)
+#     • EN web: full Gopher + C4 + FineWeb.
+#     • VI: relaxed (English `min_stop_words` etc. otherwise reject ~90% of VI).
+#     • math/science: min-words floor + GopherRepetition only — NO C4/FineWeb (they strip
+#       LaTeX) and NO Gopher quality gate (clips dense math; already classifier-curated).
 python scripts/curate/01_quality_filter.py \
-  --config configs/curation_pipeline.yaml
-#     Sanity-check survival OLD vs NEW per language/dataset before a full run:
+  --config configs/curation_pipeline.yaml \
+  --input_dir outputs/curated/lang_filtered --output_dir outputs/curated/quality_filtered
+#     Sanity-check survival OLD vs NEW per math/vi/en + dataset before a full run:
 #     python scripts/curate/measure_filter_survival.py --input_dir outputs/curated/raw --max_docs 100000
 
-# 1c. Language identification (GlotLID: en/vi)
-python scripts/curate/02_language_id.py
+# 1d. MinHash-LSH near-dedup — BEFORE the classifier
+python scripts/curate/04_dedup_minhash.py \
+  --input_dir outputs/curated/quality_filtered --output_dir outputs/curated/deduped
 
-# 1d. UltraClean fastText quality classifier (MiniCPM recipe)
-python scripts/curate/03_ultraclean_filter.py
-
-# 1e. MinHash-LSH near-dedup
-python scripts/curate/04_dedup_minhash.py
+# 1e. UltraClean fastText quality classifier (MiniCPM recipe)
+python scripts/curate/03_ultraclean_filter.py \
+  --input_dir outputs/curated/deduped --output_dir outputs/curated/ultraclean
 
 # 1f. Decontamination (remove eval set overlaps)
-python scripts/curate/05_decontaminate.py
+python scripts/curate/05_decontaminate.py \
+  --input_dir outputs/curated/ultraclean --output_dir outputs/curated/decontaminated
 
 # 1g. PII redaction
 python scripts/curate/06_pii_redact.py
@@ -223,8 +235,13 @@ python scripts/curate/07_tokenize_pack.py \
 > a ~100B-raw corpus to ~7.9B and skewing it toward the EN sources that survived. The
 > routed filter (`_curate_utils.build_quality_router`) recovers VI ~10× (vi survival
 > 9%→92%, EN unchanged); `build_mixed_corpus.py` then caps the result to the configured
-> VI/EN mix. **Always measure `.ds` token count (bytes/2) after stage 07 — don't trust
-> the HF `epoch` counter, which for a length-less IterableDataset is just step/max_steps.**
+> VI/EN mix. The same router sends math/science sources (`en_math`/`en_science`) through a
+> LaTeX-preserving chain — only a min-words floor + repetition filter, skipping C4/FineWeb
+> (whose `{`-curly-brace and short-line rules silently delete equations — the exact bug
+> FineMath was created to fix) and the Gopher quality gate (its symbol/alpha ratios clip
+> dense math; these corpora are already classifier-curated upstream). **Always measure
+> `.ds` token count (bytes/2) after stage 07 — don't trust the HF `epoch` counter, which
+> for a length-less IterableDataset is just step/max_steps.**
 
 > **Curation is built to run unattended at high worker counts.** Every stage writer
 > emits one uniform `{source,dataset,language}` metadata schema, so heterogeneous

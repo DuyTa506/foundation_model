@@ -1,4 +1,4 @@
-# Extended smoke-test config: single GPU, 4GB VRAM, 2k steps.
+# Fast smoke-test config: single GPU, 4GB VRAM, short run.
 # Purpose: validate loss curve + gradient health before scaling to cluster.
 # Uses tiny ~20M model. NOT for production — use training_8xH200_hf_pretrain.yaml.
 version: 1
@@ -44,8 +44,8 @@ scheduler:
 training:
   micro_batch_size: 4
   gradient_accumulation_steps: 1
-  total_steps: 2000
-  logging_steps: 10
+  total_steps: 40
+  logging_steps: 2
   save_steps: 1000
   eval_steps: 1000
   fp16: true

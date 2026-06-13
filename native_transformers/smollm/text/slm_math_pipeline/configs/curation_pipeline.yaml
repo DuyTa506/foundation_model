@@ -24,9 +24,23 @@ quality_filter:
   bullet_line_ratio_max: 0.90
   ellipsis_line_ratio_max: 0.30
   alpha_ratio_min: 0.65        # at least 65% of chars must be alphabetic
-  # Vietnamese-specific
+  # Vietnamese-specific (relaxed chain — EN Gopher/C4/FineWeb rules reject pure VI)
   vi_diacritic_min_ratio: 0.002  # VI docs must have some diacritics (catch garbled VI)
-  # FineWeb/C4 rules
+  vi_detect_diacritic_ratio: 0.01  # content-fallback: ≥1% diacritics ⇒ route as VI
+  vi_min_words: 50
+  vi_min_avg_word_length: 2.0
+  # Math/science chain (en_math, en_science, *_math_synth roles): these corpora are
+  # ALREADY classifier-curated upstream, so by default we only keep a min-words floor +
+  # GopherRepetitionFilter — NO C4/FineWeb (strip LaTeX) and NO Gopher quality gate
+  # (its symbol/alpha rules clip dense math). Set math_gopher_quality: true to re-enable
+  # the relaxed Gopher quality gate; the *_ratio knobs below only apply when it is on.
+  math_min_words: 30
+  math_gopher_quality: false
+  math_min_avg_word_length: 2.0
+  math_max_avg_word_length: 20
+  math_symbol_word_ratio_max: 0.50   # latex is symbol-heavy (vs 0.10 for EN web)
+  math_alpha_word_ratio_min: 0.15    # min frac of words w/ an alpha char (vs 0.35 EN)
+  # FineWeb/C4 rules (English web chain only)
   end_with_punctuation: true
   repeated_line_fraction_max: 0.30
 
@@ -50,23 +64,49 @@ dedup:
   exact_first: true            # SHA-256 exact-dedup pass before MinHash
   minhash:
     ngram_size: 5              # 5-gram at token level (datatrove default)
-    num_hashes: 128
-    jaccard_threshold: 0.80
-    bands: 8
-    rows_per_band: 16          # 8*16 = 128 total hashes
+    num_hashes: 132
+    jaccard_threshold: 0.82    # implied by bands/rows below: (1/11)^(1/12) ≈ 0.819
+    bands: 11
+    rows_per_band: 12          # 11*12 = 132 total hashes
 
 # ── Decontamination ──────────────────────────────────────────────────────────
 decontamination:
   enabled: true
+  allow_missing_benchmarks: false  # production/default: fail if an eval set cannot load
   ngram_size: 13
   benchmark_sets:
-    - openai/gsm8k
-    - hendrycks/competition_math
-    - cais/mmlu
-    - allenai/ai2_arc
-    - allenai/sciq
-    - harness:lighteval/MMLU_vi        # VI benchmarks
-    - ZaloAI/ViMMLU
+    - name: gsm8k
+      hf_dataset: openai/gsm8k
+      subset: main
+      splits: [test]
+    - name: math
+      hf_dataset: DigitalLearningGmbH/MATH-lighteval
+      splits: [test]
+    - name: mmlu_all
+      hf_dataset: cais/mmlu
+      subset: all
+      splits: [test]
+    - name: arc_challenge
+      hf_dataset: allenai/ai2_arc
+      subset: ARC-Challenge
+      splits: [test]
+    - name: arc_easy
+      hf_dataset: allenai/ai2_arc
+      subset: ARC-Easy
+      splits: [test]
+    - name: sciq
+      hf_dataset: allenai/sciq
+      splits: [test]
+    - name: vmlu_vi
+      hf_dataset: ura-hcmut/vmlu_vi
+      splits: [test]
+      streaming: true
+    - name: vmlu_val
+      hf_dataset: vilm/vmlu_val
+      splits: [validation]
+    - name: zalo_vmlu
+      hf_dataset: vinhnq29/zalo_vmlu
+      splits: [test]
   contamination_threshold: 1           # drop if ANY 13-gram overlaps
 
 # ── PII redaction ─────────────────────────────────────────────────────────────

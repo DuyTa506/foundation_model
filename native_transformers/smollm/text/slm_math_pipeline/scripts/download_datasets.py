@@ -272,8 +272,9 @@ def main() -> None:
         help="Re-download even if a source's .done marker already exists.",
     )
     parser.add_argument(
-        "--skip_errors", action="store_true", default=True,
-        help="Continue on per-source errors (default: true).",
+        "--skip_errors", action="store_true",
+        help="Continue on per-source errors. Default is fail-fast so smoke runs do not "
+             "silently validate a partial corpus.",
     )
     args = parser.parse_args()
 

@@ -20,7 +20,7 @@ Usage:
     # First run (trains VI classifier if not present):
     python scripts/curate/03_ultraclean_filter.py \
         --config configs/curation_pipeline.yaml \
-        --input_dir outputs/curated/lang_filtered \
+        --input_dir outputs/curated/deduped \
         --output_dir outputs/curated/ultraclean
 
     # If VI classifier already trained:
@@ -251,7 +251,7 @@ def classify_and_filter(
 def main() -> None:
     parser = argparse.ArgumentParser(description="UltraClean quality classifier filter.")
     parser.add_argument("--config", default="configs/curation_pipeline.yaml")
-    parser.add_argument("--input_dir", default="outputs/curated/lang_filtered")
+    parser.add_argument("--input_dir", default="outputs/curated/deduped")
     parser.add_argument("--output_dir", default="outputs/curated/ultraclean")
     parser.add_argument("--vi_classifier_path", default=None,
                         help="Path to trained VI fastText classifier (.bin). "

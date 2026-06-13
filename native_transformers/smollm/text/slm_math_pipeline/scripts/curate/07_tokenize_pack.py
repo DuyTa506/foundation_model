@@ -11,7 +11,7 @@ No padding — every token is real text.  The pretrainer reads these shards dire
 Usage:
     python scripts/curate/07_tokenize_pack.py \
         --config configs/curation_pipeline.yaml \
-        --input_dir outputs/curated/pii_clean \
+        --input_dir outputs/curated/mixed \
         --output_dir outputs/curated/tokenized \
         --tokenizer_path outputs/tokenizer \
         [--max_seq_length 4096]
@@ -113,7 +113,7 @@ def tokenize_and_pack(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tokenize + pack into fixed-length shards.")
     parser.add_argument("--config", default="configs/curation_pipeline.yaml")
-    parser.add_argument("--input_dir", default="outputs/curated/pii_clean")
+    parser.add_argument("--input_dir", default="outputs/curated/mixed")
     parser.add_argument("--output_dir", default="outputs/curated/tokenized")
     parser.add_argument("--tokenizer_path", default="outputs/tokenizer")
     parser.add_argument("--max_seq_length", type=int, default=None,

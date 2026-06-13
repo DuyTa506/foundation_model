@@ -10,7 +10,7 @@ Replaces the absent quality-filter step in the old pipeline.
 Usage:
     python scripts/curate/01_quality_filter.py \
         --config configs/curation_pipeline.yaml \
-        --input_dir outputs/curated/raw \
+        --input_dir outputs/curated/lang_filtered \
         --output_dir outputs/curated/quality_filtered
 """
 
@@ -62,7 +62,7 @@ def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Heuristic quality filter.")
     parser.add_argument("--config", default="configs/curation_pipeline.yaml")
-    parser.add_argument("--input_dir", default="outputs/curated/raw")
+    parser.add_argument("--input_dir", default="outputs/curated/lang_filtered")
     parser.add_argument("--output_dir", default="outputs/curated/quality_filtered")
     parser.add_argument("--workers", type=int, default=max(1, os.cpu_count() - 2))
     args = parser.parse_args()

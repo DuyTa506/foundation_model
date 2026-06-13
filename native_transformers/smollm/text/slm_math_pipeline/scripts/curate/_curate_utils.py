@@ -8,6 +8,7 @@ resolves without any package setup.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 
@@ -202,14 +203,37 @@ def _filter_passes(f, doc) -> bool:
 
 
 def build_dataset_language_map(cfg: dict) -> dict:
-    """hf_dataset → configured language. Stage 01 runs BEFORE language-ID (stage 02),
-    so `metadata.language` is usually absent there; `metadata.dataset` is present, and
-    the config knows each source's language. Use this to resolve language at filter time."""
+    """hf_dataset → configured language. This is a fallback when a stage runs before
+    language-ID or when a smoke fixture only has source-level metadata."""
     out = {}
     for s in cfg.get("sources", []):
         if isinstance(s, dict) and s.get("hf_dataset") and s.get("language"):
             out[s["hf_dataset"]] = str(s["language"]).lower()
     return out
+
+
+def build_dataset_role_map(cfg: dict) -> dict:
+    """hf_dataset → configured ``role`` (e.g. en_math, en_science, vi_hq_web). Used to
+    route math/science sources through a LaTeX-preserving filter chain instead of the
+    English web chain (C4/FineWeb strip LaTeX — the exact failure FineMath was built to
+    undo). Keyed by hf_dataset because that's what `metadata.dataset` carries at stage 01."""
+    out = {}
+    for s in cfg.get("sources", []):
+        if isinstance(s, dict) and s.get("hf_dataset") and s.get("role"):
+            out[s["hf_dataset"]] = str(s["role"]).lower()
+    return out
+
+
+def is_math_or_science(doc, ds2role: dict, role_markers=("math", "science")) -> bool:
+    """True if the doc's source role marks it as math/science (technical notation that
+    must be preserved). Keys on metadata.dataset → config role; falls back to
+    metadata.source/role if present. The English web filter chain (C4 curly-brace +
+    terminal-punctuation rules, FineWeb line filters) deletes LaTeX, so these sources
+    need the math chain regardless of language."""
+    role = ds2role.get(doc.metadata.get("dataset", ""), "")
+    if not role:
+        role = str(doc.metadata.get("role", "")).lower()
+    return any(m in role for m in role_markers)
 
 
 def vi_diacritic_fraction(text: str) -> float:
@@ -222,8 +246,8 @@ def vi_diacritic_fraction(text: str) -> float:
 
 def resolve_language(doc, ds2lang: dict) -> str:
     """Best-effort language from METADATA only: prefer metadata.language (set by
-    stage 02+), else map metadata.dataset via the config (works at stage 01 before
-    language-ID). Returns "" if neither is available."""
+    stage 02+), else map metadata.dataset via the config. Returns "" if neither is
+    available."""
     lang = (doc.metadata.get("language") or "").lower()
     if lang:
         return lang
@@ -233,7 +257,7 @@ def resolve_language(doc, ds2lang: dict) -> str:
 def is_vietnamese(doc, ds2lang: dict, vi_detect_ratio: float = 0.01) -> bool:
     """Decide if a doc is Vietnamese, robust to MISSING metadata:
       1. metadata.language (stage 02+), else
-      2. metadata.dataset → config language (stage 01), else
+      2. metadata.dataset → config language, else
       3. content: VI-diacritic fraction ≥ vi_detect_ratio (no metadata at all).
     Step 3 guarantees VI prose is never dumped into the English filter chain just
     because it lacks a language flag."""
@@ -251,18 +275,22 @@ def build_quality_router(cfg: dict):
     has zero). So VI gets a relaxed chain; EN keeps the full English chain. Used by
     both stage 01 and scripts/curate/measure_filter_survival.py so they stay in sync.
 
-    Routing uses dataset→language (build_dataset_language_map) because stage 01 runs
-    BEFORE language-ID — `metadata.language` is typically empty at filter time, so
-    routing on it would dump all VI into the English chain (the bug this fixes).
+    Routing keeps dataset→language (build_dataset_language_map) as a fallback so smoke
+    fixtures or manually-run stages without language-ID do not dump VI into the English
+    chain.
     """
     from datatrove.pipeline.filters import (
         C4QualityFilter, FineWebQualityFilter, GopherQualityFilter, GopherRepetitionFilter,
     )
 
     qf = cfg.get("quality_filter", {})
+    min_chars = qf.get("min_chars", 0)
+    max_chars = qf.get("max_chars")
+    max_word_length = qf.get("max_word_length")
     vi_diacritic_min = qf.get("vi_diacritic_min_ratio", 0.002)
     vi_detect_ratio = qf.get("vi_detect_diacritic_ratio", 0.01)
     mwl = qf.get("mean_word_length", [3, 10])
+    repeated_line_frac = qf.get("repeated_line_fraction_max", 0.30)
     common = dict(
         max_doc_words=None,
         max_avg_word_length=mwl[1],
@@ -275,10 +303,28 @@ def build_quality_router(cfg: dict):
     def _vi_diacritic_ok(doc) -> bool:
         return vi_diacritic_fraction(doc.text or "") >= vi_diacritic_min
 
+    def _basic_ok(doc) -> bool:
+        text = doc.text or ""
+        if min_chars and len(text) < min_chars:
+            return False
+        if max_chars and len(text) > max_chars:
+            return False
+        if max_word_length:
+            for word in re.findall(r"\S+", text):
+                if len(word) > max_word_length:
+                    return False
+        return True
+
+    def _repetition_filter():
+        return GopherRepetitionFilter(
+            dup_line_frac=repeated_line_frac,
+            dup_para_frac=repeated_line_frac,
+        )
+
     en_filters = [
         GopherQualityFilter(min_doc_words=qf.get("min_words", 50),
                             min_avg_word_length=mwl[0], **common),
-        GopherRepetitionFilter(),
+        _repetition_filter(),
         C4QualityFilter(filter_no_terminal_punct=qf.get("end_with_punctuation", True)),
         FineWebQualityFilter(),
     ]
@@ -286,14 +332,53 @@ def build_quality_router(cfg: dict):
         GopherQualityFilter(min_doc_words=qf.get("vi_min_words", qf.get("min_words", 50)),
                             min_avg_word_length=qf.get("vi_min_avg_word_length", 2.0),
                             min_stop_words=0, **common),
-        GopherRepetitionFilter(),
+        _repetition_filter(),
         C4QualityFilter(filter_no_terminal_punct=False, min_num_sentences=1,
                         min_words_per_line=1, remove_citations=False),
     ]
+    # Math/science chain. These corpora (finemath/open_web_math/ultradata_math/pes2o) are
+    # ALREADY classifier-curated upstream (MathScore, e5+Llama-70B labels, KenLM ppl), so
+    # we do NOT re-apply the generic Gopher *quality* gate — its symbol/alpha/word-length
+    # rules are tuned for web prose and clip dense LaTeX (same damage class as the C4/FineWeb
+    # rules we dropped). We keep only:
+    #   • a min-words floor   (so packing doesn't ingest 3-token fragments), and
+    #   • GopherRepetitionFilter (catches degenerate intra-doc copy-paste; domain-agnostic).
+    # The full relaxed Gopher quality gate is available behind `math_gopher_quality: true`
+    # for callers who want a stricter pass on noisier math sources.
+    math_min_words = qf.get("math_min_words", 30)
+    math_repetition = _repetition_filter()
+    math_gopher = None
+    if qf.get("math_gopher_quality", False):
+        math_alpha_min = qf.get("math_alpha_word_ratio_min", 0.15)
+        math_gopher = GopherQualityFilter(
+            min_doc_words=math_min_words,
+            min_avg_word_length=qf.get("math_min_avg_word_length", 2.0),
+            min_stop_words=0,
+            max_doc_words=None,
+            max_avg_word_length=qf.get("math_max_avg_word_length", 20),
+            max_symbol_word_ratio=qf.get("math_symbol_word_ratio_max", 0.50),
+            max_bullet_lines_ratio=0.90,
+            max_ellipsis_lines_ratio=0.30,
+            # Config is a minimum alpha-word ratio; datatrove wants max non-alpha ratio.
+            max_non_alpha_words_ratio=1.0 - math_alpha_min,
+        )
+
+    def _math_ok(doc) -> bool:
+        if len((doc.text or "").split()) < math_min_words:
+            return False
+        if math_gopher is not None and not _filter_passes(math_gopher, doc):
+            return False
+        return _filter_passes(math_repetition, doc)
 
     ds2lang = build_dataset_language_map(cfg)
+    ds2role = build_dataset_role_map(cfg)
 
     def route(doc) -> bool:
+        if not _basic_ok(doc):
+            return False
+        # Math/science FIRST: preserve LaTeX regardless of language (incl. vi_math_synth).
+        if is_math_or_science(doc, ds2role):
+            return _math_ok(doc)
         if is_vietnamese(doc, ds2lang, vi_detect_ratio):
             return all(_filter_passes(f, doc) for f in vi_filters) and _vi_diacritic_ok(doc)
         return all(_filter_passes(f, doc) for f in en_filters)

@@ -24,7 +24,8 @@ from collections import Counter
 import yaml
 
 from _curate_utils import (
-    build_dataset_language_map, build_quality_router, is_vietnamese, _filter_passes,
+    build_dataset_language_map, build_dataset_role_map, build_quality_router,
+    is_math_or_science, is_vietnamese, _filter_passes,
 )
 
 
@@ -68,6 +69,7 @@ def main() -> None:
     new_route = build_quality_router(cfg)
     old_route = _legacy_router(cfg)
     ds2lang = build_dataset_language_map(cfg)
+    ds2role = build_dataset_role_map(cfg)
 
     # tallies keyed by (level, key) → counts
     tot = Counter(); old_keep = Counter(); new_keep = Counter()
@@ -95,9 +97,14 @@ def main() -> None:
                 m = m or {}
                 doc = Document(text=txt or "", id=str(n), metadata=dict(m))
                 ko = old_route(doc); kn = new_route(doc)
-                # label by the SAME logic the router uses (metadata → dataset → content),
-                # so the table reflects how docs are actually routed even with no lang tag.
-                lang = "vi" if is_vietnamese(doc, ds2lang) else "en"
+                # label by the SAME logic the router uses (math/science → vi → en), so the
+                # table reflects how docs are actually routed even with no lang tag.
+                if is_math_or_science(doc, ds2role):
+                    lang = "math"
+                elif is_vietnamese(doc, ds2lang):
+                    lang = "vi"
+                else:
+                    lang = "en"
                 ds = (m.get("dataset") or "?")
                 tally("LANG", lang, ko, kn)
                 tally("DATASET", ds, ko, kn)
