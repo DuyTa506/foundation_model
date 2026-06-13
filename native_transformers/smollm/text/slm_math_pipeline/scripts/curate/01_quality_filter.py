@@ -22,80 +22,28 @@ from pathlib import Path
 
 import yaml
 
-from _curate_utils import prune_empty_parquet, stable_metadata_adapter
+from _curate_utils import build_quality_router, prune_empty_parquet, stable_metadata_adapter
 
 
 def build_pipeline(cfg: dict, input_dir: str, output_dir: str, workers: int):
     from datatrove.executor import LocalPipelineExecutor
-    from datatrove.pipeline.filters import (
-        C4QualityFilter,
-        FineWebQualityFilter,
-        GopherQualityFilter,
-        GopherRepetitionFilter,
-        LambdaFilter,
-    )
+    from datatrove.pipeline.filters import LambdaFilter
     from datatrove.pipeline.readers import ParquetReader
     from datatrove.pipeline.writers import ParquetWriter
 
-    qf_cfg: dict = cfg.get("quality_filter", {})
-
-    vi_diacritic_min: float = qf_cfg.get("vi_diacritic_min_ratio", 0.002)
-
-    def _vi_diacritic_check(doc) -> bool:
-        """Keep VI docs that have a meaningful fraction of diacritic characters.
-        Catches garbled/mis-labeled Vietnamese that's actually Latin without marks."""
-        text: str = doc.text or ""
-        if not text:
-            return False
-        vi_chars = sum(
-            1 for c in text
-            if c in "ăâêôơưđĂÂÊÔƠƯĐàáâãèéêìíòóôõùúýăắặằẳẵắổỗộởờớọồốổôơ"
-               "ờởớỡợặắẳẵặẻẹẽếềềểễệỉịọỏốồổỗộớờởỡợụủừứựữửúùũ"
-        )
-        ratio = vi_chars / max(len(text), 1)
-        # Only apply the check for docs the language filter will tag as Vietnamese
-        return ratio >= vi_diacritic_min
-
-    filters = [
-        GopherQualityFilter(
-            min_doc_words=qf_cfg.get("min_words", 50),
-            max_doc_words=None,
-            min_avg_word_length=qf_cfg.get("mean_word_length", [3, 10])[0],
-            max_avg_word_length=qf_cfg.get("mean_word_length", [3, 10])[1],
-            max_symbol_word_ratio=qf_cfg.get("symbol_word_ratio_max", 0.10),
-            max_bullet_lines_ratio=qf_cfg.get("bullet_line_ratio_max", 0.90),
-            max_ellipsis_lines_ratio=qf_cfg.get("ellipsis_line_ratio_max", 0.30),
-            max_non_alpha_words_ratio=1.0 - qf_cfg.get("alpha_ratio_min", 0.65),
-        ),
-        GopherRepetitionFilter(),
-        C4QualityFilter(
-            filter_no_terminal_punct=qf_cfg.get("end_with_punctuation", True),
-        ),
-        FineWebQualityFilter(),
-        # VI-specific: requires some diacritics (catches garbled VI docs)
-        LambdaFilter(
-            filter_function=lambda doc: (
-                # Only apply to docs tagged vi; skip if lang unknown yet
-                True if doc.metadata.get("language") not in ("vi", "vie_Latn")
-                else _vi_diacritic_check(doc)
-            ),
-        ),
-    ]
+    # Language-routed: VI docs get a relaxed chain (the EN-tuned Gopher/C4/FineWeb
+    # heuristics — esp. Gopher's English `min_stop_words` — reject VI en masse), EN
+    # keeps the full English chain. Logic lives in _curate_utils.build_quality_router
+    # so the survival-measurement script uses identical rules.
+    route = build_quality_router(cfg)
 
     return LocalPipelineExecutor(
         pipeline=[
             # glob_pattern restricts to parquet only; without it datatrove reads
-            # ALL files recursively, including the logs/ sidecar each stage writes
-            # inside its own output dir (0-byte completion markers, executor.json),
-            # and tries to parse them as parquet -> "Parquet file size is 0 bytes".
+            # ALL files recursively, including the logs/ sidecar each stage writes.
             ParquetReader(data_folder=input_dir, glob_pattern="**/*.parquet",
                           doc_progress=True),
-            *filters,
-            # Re-normalize metadata to the uniform {source,dataset,language} schema.
-            # This makes stage 01 tolerant of raw that was materialized BEFORE the
-            # stage-00 normalization fix (heterogeneous per-source metadata) without
-            # re-running materialize: even if a writer rank batches docs from mixed
-            # sources, the projected schema is identical -> no ArrowTypeError.
+            LambdaFilter(filter_function=route),
             ParquetWriter(
                 output_folder=output_dir,
                 output_filename="${rank}.parquet",

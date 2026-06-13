@@ -183,3 +183,74 @@ def prune_empty_parquet(folder: str | Path) -> int:
     if removed:
         print(f"[prune] removed {removed} empty/corrupt parquet file(s) under {root}")
     return removed
+
+
+# ─── Language-routed quality filter (shared by stage 01 + survival measurement) ──
+
+# Vietnamese diacritic chars (precomposed + base modified letters): catches garbled
+# / mis-labeled VI that's actually Latin without marks.
+_VI_DIACRITICS = (
+    "ăâêôơưđĂÂÊÔƠƯĐàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩị"
+    "òóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵĐ"
+)
+
+
+def _filter_passes(f, doc) -> bool:
+    """A datatrove filter's .filter() returns a bool or (keep, reason) tuple — normalize."""
+    r = f.filter(doc)
+    return bool(r[0]) if isinstance(r, tuple) else bool(r)
+
+
+def build_quality_router(cfg: dict):
+    """Return ``route(doc) -> bool`` applying language-appropriate quality filters.
+
+    The EN-tuned Gopher/C4/FineWeb heuristics reject Vietnamese en masse — most
+    fatally Gopher's ``min_stop_words=2`` against ENGLISH stop words (a pure-VI doc
+    has zero). So VI gets a relaxed chain; EN keeps the full English chain. Used by
+    both stage 01 and scripts/curate/measure_filter_survival.py so they stay in sync.
+    """
+    from datatrove.pipeline.filters import (
+        C4QualityFilter, FineWebQualityFilter, GopherQualityFilter, GopherRepetitionFilter,
+    )
+
+    qf = cfg.get("quality_filter", {})
+    vi_diacritic_min = qf.get("vi_diacritic_min_ratio", 0.002)
+    mwl = qf.get("mean_word_length", [3, 10])
+    common = dict(
+        max_doc_words=None,
+        max_avg_word_length=mwl[1],
+        max_symbol_word_ratio=qf.get("symbol_word_ratio_max", 0.10),
+        max_bullet_lines_ratio=qf.get("bullet_line_ratio_max", 0.90),
+        max_ellipsis_lines_ratio=qf.get("ellipsis_line_ratio_max", 0.30),
+        max_non_alpha_words_ratio=1.0 - qf.get("alpha_ratio_min", 0.65),
+    )
+
+    def _vi_diacritic_ok(doc) -> bool:
+        text = doc.text or ""
+        if not text:
+            return False
+        return sum(1 for c in text if c in _VI_DIACRITICS) / len(text) >= vi_diacritic_min
+
+    en_filters = [
+        GopherQualityFilter(min_doc_words=qf.get("min_words", 50),
+                            min_avg_word_length=mwl[0], **common),
+        GopherRepetitionFilter(),
+        C4QualityFilter(filter_no_terminal_punct=qf.get("end_with_punctuation", True)),
+        FineWebQualityFilter(),
+    ]
+    vi_filters = [
+        GopherQualityFilter(min_doc_words=qf.get("vi_min_words", qf.get("min_words", 50)),
+                            min_avg_word_length=qf.get("vi_min_avg_word_length", 2.0),
+                            min_stop_words=0, **common),
+        GopherRepetitionFilter(),
+        C4QualityFilter(filter_no_terminal_punct=False, min_num_sentences=1,
+                        min_words_per_line=1, remove_citations=False),
+    ]
+
+    def route(doc) -> bool:
+        lang = (doc.metadata.get("language") or "").lower()
+        if lang.startswith("vi"):
+            return all(_filter_passes(f, doc) for f in vi_filters) and _vi_diacritic_ok(doc)
+        return all(_filter_passes(f, doc) for f in en_filters)
+
+    return route
