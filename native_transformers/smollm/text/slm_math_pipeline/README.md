@@ -566,6 +566,8 @@ logging:
 - **Train-time data ordering**: shards are interleaved (all read concurrently, random live-shard draw) + reservoir-buffer shuffled + reshuffled per epoch, so a single pass over ~104B tokens isn't source-clustered. Labels = input_ids (the model shifts internally; pre-shifting would double-shift).
 - **Eval loss**: set `data.val_shards_dir` (held-out shards) to log `eval_loss` every `eval_steps`; null = train loss only.
 - **Tokenizer**: byte-level BPE, NFC normalization (not NFKC — NFKC strips Vietnamese diacritics), `individual_digits=True` for math.
+  - **Frozen vs the model.** Re-running curation (01→07) reuses `outputs/tokenizer/` as-is — do NOT retrain it, because the model embeddings are tied to this 64K vocab; a new tokenizer forces a full `init_model_from_scratch`.
+  - **Check fertility** in `outputs/tokenizer/tokenizer_card.json` (tokens/word). VI/EN are efficient at 64K (≈1.08 / 1.25, under target). Watch **`latex` fertility** — a test card showed ≈3.7 vs a 2.5 target, meaning math tokenizes ~50% over budget; if the production card is also high, the only fix is **retraining the tokenizer** with more math/LaTeX in `tokenizer_en_vi.yaml` (→ re-init). Do this in the same reset if needed, since it's a math-first model.
 - **Long-context**: staged extension 4k → 16k → 32k (ABF) → 64k → 128k (YaRN). Each step is a 2× factor; skipping stages is unstable.
 - **GRPO rewards**: correctness (sympy equivalence) + format (single `<think>` block) + language consistency (penalizes VI prompts generating EN/ZH reasoning).
 - **Wikipedia VI** is only 1% weight (~0.3B unique tokens) to avoid excessive upsampling (~15× at higher weights).
