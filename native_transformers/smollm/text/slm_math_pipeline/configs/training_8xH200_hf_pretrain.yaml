@@ -57,8 +57,27 @@ data:
   #   python scripts/data/build_val_shard.py --tokenizer_path outputs/tokenizer \
   #     --output_dir outputs/curated/val --val_tokens 16000000
   # Missing/empty dir → trainer warns and reports train loss only (no crash).
-  val_shards_dir: outputs/curated/val
-  eval_max_sequences: 2000     # hard cap per eval so it stays fast + comparable
+  val_shards_dir: outputs/curated/val   # single blended val; IGNORED when val_domains is set
+  eval_max_sequences: 2000     # hard cap PER domain so eval stays fast + comparable
+  # Per-domain eval (default on): logs a SEPARATE eval/<name>_loss so a rising eval
+  # loss can be traced to the domain that's actually regressing (a blended number
+  # can't). vi is split hq vs web because raw VI web is the prime suspect for the
+  # implausibly-low train loss — if eval/vi_web_loss is far below eval/en_math_loss,
+  # the model is over-fitting easy/duplicated VI web. Build each held-out dir first:
+  #   python scripts/data/build_val_shard.py --sources fineweb2_hq_vi vi_curated wikipedia_vi \
+  #     --output_dir outputs/curated/val_vi_hq  --val_tokens 40000000
+  #   python scripts/data/build_val_shard.py --sources c4_vi madlad_vi hplt_vi culturax_vi \
+  #     --output_dir outputs/curated/val_vi_web --val_tokens 40000000
+  #   python scripts/data/build_val_shard.py --sources finemath_4plus open_web_math ultradata_math \
+  #     --output_dir outputs/curated/val_math   --val_tokens 40000000
+  #   python scripts/data/build_val_shard.py --sources fineweb_edu pes2o \
+  #     --output_dir outputs/curated/val_sci    --val_tokens 40000000
+  # Missing dirs degrade gracefully (that domain is skipped, no crash).
+  val_domains:
+    vi_hq:   outputs/curated/val_vi_hq
+    vi_web:  outputs/curated/val_vi_web
+    en_math: outputs/curated/val_math
+    en_sci:  outputs/curated/val_sci
 
 # ── Optimizer ────────────────────────────────────────────────────────────────
 optimization:
@@ -102,7 +121,11 @@ training:
   # curriculum. Sanity-check by watching when `epoch` first crosses 1.0 (~step 48k).
   logging_steps: 10
   save_steps: 1000
-  eval_steps: 5000
+  eval_steps: 1000             # was 5000 — too coarse (only 2 points in 10k). 1000 aligns
+                               # with save_steps so eval+checkpoint coincide. Each eval now
+                               # runs 4 domains × eval_max_sequences, so ~500 would ~2× the
+                               # eval overhead (4 domains × 2k seq isn't free); 1000 is the
+                               # sweet spot. Drop eval_max_sequences if you want 500.
   bf16: true
   gradient_checkpointing: false  # H200 + 1B model + FA2: no OOM risk at seq=4096
   torch_compile: false           # set true for ~15% speedup; may conflict with FSDP on some builds

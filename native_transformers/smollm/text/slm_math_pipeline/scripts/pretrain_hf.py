@@ -570,20 +570,37 @@ def main() -> None:
     # build a small source-stratified set with scripts/data/build_val_shard.py.
     # Deterministic order + hard sequence cap so eval is fast and comparable across
     # checkpoints. Missing/empty dir → warn and report train loss only (no crash).
+    eval_cap = data_cfg.get("eval_max_sequences", 2000)
+
+    def _build_eval(path):
+        # deterministic (no shuffle) + capped so eval is fast and comparable.
+        return PackedTokenDataset(
+            path, max_seq_length, shuffle_buffer_size=0,
+            shuffle_shards=False, shard_interleave=False, max_sequences=eval_cap,
+        ).as_hf_dataset()
+
+    # Per-domain eval: data.val_domains maps a name → a held-out dir, so wandb logs a
+    # SEPARATE eval/<name>_loss (e.g. vi, en_math, en_sci). This localizes a rising
+    # eval loss to the domain that's actually regressing — a single blended number
+    # can't. Build each with build_val_shard.py --sources <...> --output_dir <dir>.
+    # Falls back to the single val_shards_dir if val_domains is unset.
+    val_domains = data_cfg.get("val_domains")
     val_shards_dir = data_cfg.get("val_shards_dir")
     eval_dataset = None
-    if val_shards_dir:
+    if val_domains:
+        eval_dataset = {}
+        for name, path in val_domains.items():
+            try:
+                eval_dataset[name] = _build_eval(path)
+                print(f"[pretrain] eval[{name}]: {path}  (<= {eval_cap} seqs)")
+            except FileNotFoundError:
+                print(f"[pretrain] eval[{name}]: no shards in {path} → skipped")
+        if not eval_dataset:
+            eval_dataset = None
+    elif val_shards_dir:
         try:
-            eval_dataset = PackedTokenDataset(
-                val_shards_dir,
-                max_seq_length,
-                shuffle_buffer_size=0,      # deterministic: same sequences every eval
-                shuffle_shards=False,
-                shard_interleave=False,
-                max_sequences=data_cfg.get("eval_max_sequences", 2000),
-            ).as_hf_dataset()
-            print(f"[pretrain] eval set: {val_shards_dir}  "
-                  f"(<= {data_cfg.get('eval_max_sequences', 2000)} seqs/eval)")
+            eval_dataset = _build_eval(val_shards_dir)
+            print(f"[pretrain] eval set: {val_shards_dir}  (<= {eval_cap} seqs/eval)")
         except FileNotFoundError:
             print(f"[pretrain] val_shards_dir set but no shards in {val_shards_dir} "
                   f"→ eval disabled, train loss only (run build_val_shard.py to enable)")
