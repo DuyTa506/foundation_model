@@ -201,6 +201,26 @@ def _filter_passes(f, doc) -> bool:
     return bool(r[0]) if isinstance(r, tuple) else bool(r)
 
 
+def build_dataset_language_map(cfg: dict) -> dict:
+    """hf_dataset → configured language. Stage 01 runs BEFORE language-ID (stage 02),
+    so `metadata.language` is usually absent there; `metadata.dataset` is present, and
+    the config knows each source's language. Use this to resolve language at filter time."""
+    out = {}
+    for s in cfg.get("sources", []):
+        if isinstance(s, dict) and s.get("hf_dataset") and s.get("language"):
+            out[s["hf_dataset"]] = str(s["language"]).lower()
+    return out
+
+
+def resolve_language(doc, ds2lang: dict) -> str:
+    """Best-effort language for a doc: prefer metadata.language (set by stage 02+),
+    else map metadata.dataset via the config (works at stage 01 before language-ID)."""
+    lang = (doc.metadata.get("language") or "").lower()
+    if lang:
+        return lang
+    return ds2lang.get(doc.metadata.get("dataset", ""), "")
+
+
 def build_quality_router(cfg: dict):
     """Return ``route(doc) -> bool`` applying language-appropriate quality filters.
 
@@ -208,6 +228,10 @@ def build_quality_router(cfg: dict):
     fatally Gopher's ``min_stop_words=2`` against ENGLISH stop words (a pure-VI doc
     has zero). So VI gets a relaxed chain; EN keeps the full English chain. Used by
     both stage 01 and scripts/curate/measure_filter_survival.py so they stay in sync.
+
+    Routing uses dataset→language (build_dataset_language_map) because stage 01 runs
+    BEFORE language-ID — `metadata.language` is typically empty at filter time, so
+    routing on it would dump all VI into the English chain (the bug this fixes).
     """
     from datatrove.pipeline.filters import (
         C4QualityFilter, FineWebQualityFilter, GopherQualityFilter, GopherRepetitionFilter,
@@ -247,9 +271,10 @@ def build_quality_router(cfg: dict):
                         min_words_per_line=1, remove_citations=False),
     ]
 
+    ds2lang = build_dataset_language_map(cfg)
+
     def route(doc) -> bool:
-        lang = (doc.metadata.get("language") or "").lower()
-        if lang.startswith("vi"):
+        if resolve_language(doc, ds2lang).startswith("vi"):
             return all(_filter_passes(f, doc) for f in vi_filters) and _vi_diacritic_ok(doc)
         return all(_filter_passes(f, doc) for f in en_filters)
 
