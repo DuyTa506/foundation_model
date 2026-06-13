@@ -59,6 +59,19 @@ data:
   # Missing/empty dir → trainer warns and reports train loss only (no crash).
   val_shards_dir: outputs/curated/val
   eval_max_sequences: 2000     # hard cap per eval so it stays fast + comparable
+  # Per-domain eval (optional, overrides val_shards_dir): logs a SEPARATE
+  # eval/<name>_loss so a rising eval loss can be traced to the domain that's
+  # actually regressing (a single blended number can't). Build each held-out dir:
+  #   python scripts/data/build_val_shard.py --sources fineweb2_hq_vi c4_vi vi_curated \
+  #     --output_dir outputs/curated/val_vi   --val_tokens 40000000
+  #   python scripts/data/build_val_shard.py --sources finemath_4plus open_web_math ultradata_math \
+  #     --output_dir outputs/curated/val_math --val_tokens 40000000
+  #   python scripts/data/build_val_shard.py --sources fineweb_edu pes2o \
+  #     --output_dir outputs/curated/val_sci  --val_tokens 40000000
+  # val_domains:
+  #   vi:      outputs/curated/val_vi
+  #   en_math: outputs/curated/val_math
+  #   en_sci:  outputs/curated/val_sci
 
 # ── Optimizer ────────────────────────────────────────────────────────────────
 optimization:
